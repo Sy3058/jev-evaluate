@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>JEV 모델 평가실</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header>
+      <div>
+        <p class="eyebrow">LOCAL EVALUATION LAB</p>
+        <h1>JEV 모델 평가실</h1>
+        <p class="subtitle">여섯 모델의 한국어 답변을 같은 기준으로 독립 평가합니다.</p>
+      </div>
+      <div id="api-status" class="status">연결 확인 중</div>
+    </header>
+
+    <nav aria-label="주요 화면">
+      <button class="tab active" data-view="input">답변 입력</button>
+      <button class="tab" data-view="results">결과 분석</button>
+    </nav>
+
+    <main>
+      <section id="input-view" class="view active">
+        <form id="case-form">
+          <div class="panel intro-panel">
+            <div>
+              <span class="step">01</span>
+              <h2>평가 질문</h2>
+            </div>
+            <p>질문 한 개와 각 모델의 답변을 함께 저장합니다. 비어 있는 모델은 건너뜁니다.</p>
+          </div>
+
+          <div class="panel form-grid">
+            <label>케이스 제목<input name="title" required placeholder="예: Python 비동기 설명" /></label>
+            <label>질문 유형
+              <select name="category" required>
+                <option value="코딩">코딩</option>
+                <option value="강의·첨부자료">강의·첨부자료</option>
+                <option value="일반지식·설명">일반지식·설명</option>
+                <option value="추론·문제해결">추론·문제해결</option>
+                <option value="지시사항 준수">지시사항 준수</option>
+              </select>
+            </label>
+            <label class="full">사용자 질문<textarea name="prompt" required rows="5" placeholder="실제로 입력한 질문을 그대로 붙여넣으세요."></textarea></label>
+            <label class="full">이전 대화 기록 <span>선택</span><textarea name="conversationHistory" rows="4" placeholder="역할을 구분해 붙여넣으세요. 예: 사용자: ... / 어시스턴트: ..."></textarea></label>
+            <label class="full">첨부 문서 텍스트 <span>선택</span><textarea name="attachmentText" rows="4" placeholder="파일 자체가 아니라 평가에 필요한 텍스트를 붙여넣으세요."></textarea></label>
+          </div>
+
+          <div class="section-heading"><span class="step">02</span><div><h2>모델 답변</h2><p>동일한 질문에 대한 결과를 모델별로 붙여넣으세요.</p></div></div>
+          <div id="response-fields" class="response-grid"></div>
+          <div class="actions"><button class="primary" type="submit">케이스 저장</button><button type="reset">입력 지우기</button></div>
+        </form>
+      </section>
+
+      <section id="results-view" class="view">
+        <div class="results-toolbar">
+          <div><span class="step">03</span><h2>결과 분석</h2></div>
+          <div class="actions"><select id="category-filter"><option value="">모든 유형</option></select><button id="evaluate-all" class="primary">미평가 모두 실행</button><a class="button" href="/api/export.csv">CSV 내보내기</a></div>
+        </div>
+        <div id="summary" class="summary-grid"></div>
+        <div class="panel table-wrap">
+          <table>
+            <thead><tr><th>케이스</th><th>모델</th><th>상태</th><th>종합</th><th>정확성</th><th>지시 준수</th><th>위험</th><th></th></tr></thead>
+            <tbody id="result-rows"></tbody>
+          </table>
+          <div id="empty-state" class="empty">아직 저장된 답변이 없습니다.</div>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" role="status" aria-live="polite"></div>
+    <script src="/app.js" defer></script>
+  </body>
+</html>
