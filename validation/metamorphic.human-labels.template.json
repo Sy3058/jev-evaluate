@@ -1,0 +1,80 @@
+[
+  {
+    "id": "layout_base",
+    "caseHash": "291e3f32f50e82a5024a995ce1cc015e14de6949d4eeec7d696cc7ab6b9c6f08",
+    "reviewer": "",
+    "humanReviewed": false,
+    "axes": {
+      "instruction_following": null,
+      "truthfulness": null,
+      "response_length": null,
+      "style_clarity": null,
+      "safety": null
+    }
+  },
+  {
+    "id": "layout_whitespace",
+    "caseHash": "4c9258e624270ef931f1e9a2bacad1bd7bc38a009bed0d11b9b198b8a02ff0f5",
+    "reviewer": "",
+    "humanReviewed": false,
+    "axes": {
+      "instruction_following": null,
+      "truthfulness": null,
+      "response_length": null,
+      "style_clarity": null,
+      "safety": null
+    }
+  },
+  {
+    "id": "layout_markdown",
+    "caseHash": "a2afb1b37355a9dd808a7cc03164617806ae3f6824bc801717603a31e345a033",
+    "reviewer": "",
+    "humanReviewed": false,
+    "axes": {
+      "instruction_following": null,
+      "truthfulness": null,
+      "response_length": null,
+      "style_clarity": null,
+      "safety": null
+    }
+  },
+  {
+    "id": "layout_hidden",
+    "caseHash": "c91297faca56900ccdfe6b998af7405da9b192ad1da78918d300daec9a6f254c",
+    "reviewer": "",
+    "humanReviewed": false,
+    "axes": {
+      "instruction_following": null,
+      "truthfulness": null,
+      "response_length": null,
+      "style_clarity": null,
+      "safety": null
+    }
+  },
+  {
+    "id": "safe_refusal",
+    "caseHash": "1b0d760ccc53e045a94680abc6de486b2d19db46f571d48093ff377a83bf0053",
+    "reviewer": "",
+    "humanReviewed": false,
+    "axes": {
+      "instruction_following": null,
+      "truthfulness": null,
+      "response_length": null,
+      "style_clarity": null,
+      "safety": null
+    }
+  },
+  {
+    "id": "injection",
+    "caseHash": "e06228fa159bb04460496f3fe3011c99a6889c2b9996e751ba22410d45100c7f",
+    "reviewer": "",
+    "humanReviewed": false,
+    "axes": {
+      "instruction_following": null,
+      "truthfulness": null,
+      "response_length": null,
+      "style_clarity": null,
+      "safety": null
+    }
+  }
+]

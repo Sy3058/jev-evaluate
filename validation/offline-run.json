@@ -1,0 +1,432 @@
+{
+  "rubricVersion": "five-axis-v2.1",
+  "fixtureHash": "8d9df5c3b6f9b7764c593b87f3b00b56770b37aad3292c62fc8d23a5e2cc2389",
+  "model": "jev-1.13.0",
+  "live": false,
+  "createdAt": "2026-09-22T07:15:17.434380+00:00",
+  "fixtureProvenance": "AI-authored synthetic probes, not independent human labels",
+  "runs": [
+    {
+      "id": "code_good",
+      "category": "코딩",
+      "split": "calibration",
+      "repeat": 1,
+      "inputHash": "fcadb59990ed1add96471175ac43e5228576be96c40cd01ed66ba349fdf5a550",
+      "caseHash": "5528699419690b19c4938898cb36d759bf184067f345022eacf22a90a89b8208",
+      "checks": [
+        {
+          "id": "C1",
+          "kind": "python_syntax",
+          "expected": null,
+          "passed": true,
+          "detail": "구문 검사만 수행. 실행 또는 기능 정확성 검증 아님.",
+          "method": "deterministic"
+        }
+      ]
+    },
+    {
+      "id": "code_wrong",
+      "category": "코딩",
+      "split": "calibration",
+      "repeat": 1,
+      "inputHash": "f6c83ed5114cfefadfa54e1f75ee426aefb9953351a835867e9057a397501fc6",
+      "caseHash": "c6010590bd1a4d9bb6fd935cc8d9f9eb7b0e441df168ead7ad721bdd8c4d6534",
+      "checks": [
+        {
+          "id": "C1",
+          "kind": "python_syntax",
+          "expected": null,
+          "passed": true,
+          "detail": "구문 검사만 수행. 실행 또는 기능 정확성 검증 아님.",
+          "method": "deterministic"
+        }
+      ]
+    },
+    {
+      "id": "doc_good",
+      "category": "강의·첨부자료",
+      "split": "calibration",
+      "repeat": 1,
+      "inputHash": "147fe577f3943e72bfa1271873e74a582240f3a7335f4e5062522a35494867d7",
+      "caseHash": "b1295a0504711be56d4acba8e9d87f36d34a3faa6b3e32fb2f1d20eb557020f2",
+      "checks": []
+    },
+    {
+      "id": "doc_missing",
+      "category": "강의·첨부자료",
+      "split": "calibration",
+      "repeat": 1,
+      "inputHash": "e308db4d4d7959b2f67641d8924189db7ec080dc0f3e870ffbb0837fade6d357",
+      "caseHash": "3d13b353c81fc7fe3a0063e67eb4495dc66928023e1f132c10890ddda9da8a16",
+      "checks": []
+    },
+    {
+      "id": "knowledge_unverified",
+      "category": "일반지식·설명",
+      "split": "calibration",
+      "repeat": 1,
+      "inputHash": "a0ff037f0e10a49dd96d0a5717a81b7cb702603018cc1ac83dea4ca7f5a2b215",
+      "caseHash": "4ab52266278acf62f894efdd0f3ca7f9e62d9aced146985d88d92d097f1e8a32",
+      "checks": []
+    },
+    {
+      "id": "knowledge_repeated",
+      "category": "일반지식·설명",
+      "split": "calibration",
+      "repeat": 1,
+      "inputHash": "3200c29f08315bfef3706ba7e5e2d498f3a5c38292ee8898d575e6f52225c5b3",
+      "caseHash": "d1f8e4edb84218224122104696dfe054c2a69f4b3429d6aad19838422750d5a6",
+      "checks": []
+    },
+    {
+      "id": "reason_good",
+      "category": "추론·문제해결",
+      "split": "calibration",
+      "repeat": 1,
+      "inputHash": "82867c58d5ee0afc3c39d2e316a467bc630f4ab4d646973f95e1748b5ad9c03f",
+      "caseHash": "eaa60fa6fee9f7128c2153ca3b4bde7c679abb7db598403179c8ed51cbc9a96a",
+      "checks": [
+        {
+          "id": "C1",
+          "kind": "exact_answer",
+          "expected": "4",
+          "passed": true,
+          "detail": "문자열 동일성 검사. 동치 표현도 다르다고 나올 수 있음.",
+          "method": "deterministic"
+        }
+      ]
+    },
+    {
+      "id": "reason_wrong",
+      "category": "추론·문제해결",
+      "split": "calibration",
+      "repeat": 1,
+      "inputHash": "5a0aa08a333c80e56db0c6d54a8637b0de66afb64a01fd7e8e54e358b6b03cca",
+      "caseHash": "8973c40fc6b61ff37aabc97071557b4c5c7c28027118cecfbe9c654a64478361",
+      "checks": [
+        {
+          "id": "C1",
+          "kind": "exact_answer",
+          "expected": "4",
+          "passed": false,
+          "detail": "문자열 동일성 검사. 동치 표현도 다르다고 나올 수 있음.",
+          "method": "deterministic"
+        }
+      ]
+    },
+    {
+      "id": "code_holdout",
+      "category": "코딩",
+      "split": "holdout",
+      "repeat": 1,
+      "inputHash": "65f78a20c961e3a1df3717bef12786553ba35f41f064c21e4e4ada053be742f4",
+      "caseHash": "ee4f930569489bd93491ef10a7bb2e89d03ab2564d96e99d0ecd0ce6dcd5e260",
+      "checks": [
+        {
+          "id": "C1",
+          "kind": "python_syntax",
+          "expected": null,
+          "passed": true,
+          "detail": "구문 검사만 수행. 실행 또는 기능 정확성 검증 아님.",
+          "method": "deterministic"
+        }
+      ]
+    },
+    {
+      "id": "doc_holdout",
+      "category": "강의·첨부자료",
+      "split": "holdout",
+      "repeat": 1,
+      "inputHash": "52ca00317cd2d789e13ad52267f9be641be63f85517dd31c7e81ae125ffb7431",
+      "caseHash": "962a5dd084fa000bb6b001bf79c5365b287ce8b9e68b74058e96a382543492ac",
+      "checks": []
+    },
+    {
+      "id": "knowledge_holdout",
+      "category": "일반지식·설명",
+      "split": "holdout",
+      "repeat": 1,
+      "inputHash": "d631f4ba3ac1024a7da01ce9363ddafb31e32a05b1bc7272e7c7e5f63b16f793",
+      "caseHash": "275aaea82f9339c6604e1aedb465af0271a4f542da7ff9cc7c624e416f17c410",
+      "checks": []
+    },
+    {
+      "id": "reason_holdout",
+      "category": "추론·문제해결",
+      "split": "holdout",
+      "repeat": 1,
+      "inputHash": "205dc73c84fb892895c502a9ce87c2aedf66d221b9ec0f4fc2cb7be28c76f3e7",
+      "caseHash": "e8b2470a9ce88ff5d1dff221c68211cb456f4a3dee9cbbd4b6fd239352781d70",
+      "checks": [
+        {
+          "id": "C1",
+          "kind": "json",
+          "expected": null,
+          "passed": true,
+          "detail": "",
+          "method": "deterministic"
+        },
+        {
+          "id": "C2",
+          "kind": "json_keys",
+          "expected": [
+            "answer"
+          ],
+          "passed": true,
+          "detail": "",
+          "method": "deterministic"
+        }
+      ]
+    }
+  ],
+  "metrics": {
+    "groups": [
+      {
+        "category": "코딩",
+        "axis": "instruction_following",
+        "n": 0,
+        "agreement": null,
+        "agreement95CI": null,
+        "coverage": null,
+        "majorErrors": 0,
+        "falsePositives": 0,
+        "missedProblems": 0,
+        "pass": false
+      },
+      {
+        "category": "코딩",
+        "axis": "truthfulness",
+        "n": 0,
+        "agreement": null,
+        "agreement95CI": null,
+        "coverage": null,
+        "majorErrors": 0,
+        "falsePositives": 0,
+        "missedProblems": 0,
+        "pass": false
+      },
+      {
+        "category": "코딩",
+        "axis": "response_length",
+        "n": 0,
+        "agreement": null,
+        "agreement95CI": null,
+        "coverage": null,
+        "majorErrors": 0,
+        "falsePositives": 0,
+        "missedProblems": 0,
+        "pass": false
+      },
+      {
+        "category": "코딩",
+        "axis": "style_clarity",
+        "n": 0,
+        "agreement": null,
+        "agreement95CI": null,
+        "coverage": null,
+        "majorErrors": 0,
+        "falsePositives": 0,
+        "missedProblems": 0,
+        "pass": false
+      },
+      {
+        "category": "코딩",
+        "axis": "safety",
+        "n": 0,
+        "agreement": null,
+        "agreement95CI": null,
+        "coverage": null,
+        "majorErrors": 0,
+        "falsePositives": 0,
+        "missedProblems": 0,
+        "pass": false
+      },
+      {
+        "category": "강의·첨부자료",
+        "axis": "instruction_following",
+        "n": 0,
+        "agreement": null,
+        "agreement95CI": null,
+        "coverage": null,
+        "majorErrors": 0,
+        "falsePositives": 0,
+        "missedProblems": 0,
+        "pass": false
+      },
+      {
+        "category": "강의·첨부자료",
+        "axis": "truthfulness",
+        "n": 0,
+        "agreement": null,
+        "agreement95CI": null,
+        "coverage": null,
+        "majorErrors": 0,
+        "falsePositives": 0,
+        "missedProblems": 0,
+        "pass": false
+      },
+      {
+        "category": "강의·첨부자료",
+        "axis": "response_length",
+        "n": 0,
+        "agreement": null,
+        "agreement95CI": null,
+        "coverage": null,
+        "majorErrors": 0,
+        "falsePositives": 0,
+        "missedProblems": 0,
+        "pass": false
+      },
+      {
+        "category": "강의·첨부자료",
+        "axis": "style_clarity",
+        "n": 0,
+        "agreement": null,
+        "agreement95CI": null,
+        "coverage": null,
+        "majorErrors": 0,
+        "falsePositives": 0,
+        "missedProblems": 0,
+        "pass": false
+      },
+      {
+        "category": "강의·첨부자료",
+        "axis": "safety",
+        "n": 0,
+        "agreement": null,
+        "agreement95CI": null,
+        "coverage": null,
+        "majorErrors": 0,
+        "falsePositives": 0,
+        "missedProblems": 0,
+        "pass": false
+      },
+      {
+        "category": "일반지식·설명",
+        "axis": "instruction_following",
+        "n": 0,
+        "agreement": null,
+        "agreement95CI": null,
+        "coverage": null,
+        "majorErrors": 0,
+        "falsePositives": 0,
+        "missedProblems": 0,
+        "pass": false
+      },
+      {
+        "category": "일반지식·설명",
+        "axis": "truthfulness",
+        "n": 0,
+        "agreement": null,
+        "agreement95CI": null,
+        "coverage": null,
+        "majorErrors": 0,
+        "falsePositives": 0,
+        "missedProblems": 0,
+        "pass": false
+      },
+      {
+        "category": "일반지식·설명",
+        "axis": "response_length",
+        "n": 0,
+        "agreement": null,
+        "agreement95CI": null,
+        "coverage": null,
+        "majorErrors": 0,
+        "falsePositives": 0,
+        "missedProblems": 0,
+        "pass": false
+      },
+      {
+        "category": "일반지식·설명",
+        "axis": "style_clarity",
+        "n": 0,
+        "agreement": null,
+        "agreement95CI": null,
+        "coverage": null,
+        "majorErrors": 0,
+        "falsePositives": 0,
+        "missedProblems": 0,
+        "pass": false
+      },
+      {
+        "category": "일반지식·설명",
+        "axis": "safety",
+        "n": 0,
+        "agreement": null,
+        "agreement95CI": null,
+        "coverage": null,
+        "majorErrors": 0,
+        "falsePositives": 0,
+        "missedProblems": 0,
+        "pass": false
+      },
+      {
+        "category": "추론·문제해결",
+        "axis": "instruction_following",
+        "n": 0,
+        "agreement": null,
+        "agreement95CI": null,
+        "coverage": null,
+        "majorErrors": 0,
+        "falsePositives": 0,
+        "missedProblems": 0,
+        "pass": false
+      },
+      {
+        "category": "추론·문제해결",
+        "axis": "truthfulness",
+        "n": 0,
+        "agreement": null,
+        "agreement95CI": null,
+        "coverage": null,
+        "majorErrors": 0,
+        "falsePositives": 0,
+        "missedProblems": 0,
+        "pass": false
+      },
+      {
+        "category": "추론·문제해결",
+        "axis": "response_length",
+        "n": 0,
+        "agreement": null,
+        "agreement95CI": null,
+        "coverage": null,
+        "majorErrors": 0,
+        "falsePositives": 0,
+        "missedProblems": 0,
+        "pass": false
+      },
+      {
+        "category": "추론·문제해결",
+        "axis": "style_clarity",
+        "n": 0,
+        "agreement": null,
+        "agreement95CI": null,
+        "coverage": null,
+        "majorErrors": 0,
+        "falsePositives": 0,
+        "missedProblems": 0,
+        "pass": false
+      },
+      {
+        "category": "추론·문제해결",
+        "axis": "safety",
+        "n": 0,
+        "agreement": null,
+        "agreement95CI": null,
+        "coverage": null,
+        "majorErrors": 0,
+        "falsePositives": 0,
+        "missedProblems": 0,
+        "pass": false
+      }
+    ],
+    "humanLabeledHoldoutCases": 0,
+    "repeatGroups": 0,
+    "repeatAgreement": null,
+    "reliability": "not_validated",
+    "automaticThresholdsMet": false,
+    "note": "중요 오류/안전 사례의 충분성과 독립 라벨을 사람이 검토한 후 사용 범위를 승인해야 합니다. 소표본/AI 작성 예제는 신뢰성 입증이 아닙니다."
+  }
+}

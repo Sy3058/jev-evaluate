@@ -1,0 +1,14 @@
+[
+  {"id":"code_good","split":"calibration","category":"코딩","prompt":"Python으로 두 수를 더하는 add(a,b) 함수만 작성해줘.","requirements":["add(a,b) 함수를 제공한다.","코드만 제공한다."],"expectedAnswer":"def add(a, b):\n    return a + b","outputFormat":"python","response":"def add(a, b):\n    return a + b"},
+  {"id":"code_wrong","split":"calibration","category":"코딩","prompt":"Python으로 두 수를 더하는 add(a,b) 함수만 작성해줘.","requirements":["add(a,b) 함수를 제공한다.","코드만 제공한다."],"expectedAnswer":"def add(a, b):\n    return a + b","outputFormat":"python","response":"def add(a, b):\n    return a - b"},
+  {"id":"doc_good","split":"calibration","category":"강의·첨부자료","prompt":"원문의 목적과 절차를 요약해줘.","requirements":["목적을 포함한다.","절차를 포함한다."],"attachment":"목적: 파일 읽기 능력을 비교한다.\n\n절차: 파일을 업로드하고 질문한다.","response":"목적은 파일 읽기 능력 비교입니다. 파일을 업로드하고 질문합니다."},
+  {"id":"doc_missing","split":"calibration","category":"강의·첨부자료","prompt":"원문의 목적과 절차를 요약해줘.","requirements":["목적을 포함한다.","절차를 포함한다."],"attachment":"목적: 파일 읽기 능력을 비교한다.\n\n절차: 파일을 업로드하고 질문한다.","response":"파일을 업로드하고 질문합니다."},
+  {"id":"knowledge_unverified","split":"calibration","category":"일반지식·설명","prompt":"물의 화학식을 알려줘.","requirements":["화학식을 제시한다."],"response":"H2O입니다."},
+  {"id":"knowledge_repeated","split":"calibration","category":"일반지식·설명","prompt":"기준 답안에 따라 물의 화학식을 간단히 알려줘.","requirements":["화학식을 제시한다."],"expectedAnswer":"물의 화학식은 H2O이다.","response":"물은 H2O입니다. 물은 H2O입니다. 물은 H2O입니다. 물은 H2O입니다. 물은 H2O입니다."},
+  {"id":"reason_good","split":"calibration","category":"추론·문제해결","prompt":"2+2의 답만 출력해줘.","requirements":["답만 출력한다."],"expectedAnswer":"4","checks":[{"kind":"exact_answer","value":"4"}],"response":"4"},
+  {"id":"reason_wrong","split":"calibration","category":"추론·문제해결","prompt":"2+2의 답만 출력해줘.","requirements":["답만 출력한다."],"expectedAnswer":"4","checks":[{"kind":"exact_answer","value":"4"}],"response":"5"},
+  {"id":"code_holdout","split":"holdout","category":"코딩","prompt":"리스트 길이를 반환하는 size(items) 함수를 작성해줘.","requirements":["size(items) 함수를 제공한다."],"expectedAnswer":"def size(items):\n    return len(items)","outputFormat":"python","response":"def size(items):\n    return len(items) + 1"},
+  {"id":"doc_holdout","split":"holdout","category":"강의·첨부자료","prompt":"자료를 HTML 표로 정리해줘.","requirements":["HTML로 작성한다.","자료 내용을 표로 구성한다."],"attachment":"참석 인원은 8명이다.","outputFormat":"html","response":"<table><tr><th>참석 인원</th><td>80명</td></tr></table>"},
+  {"id":"knowledge_holdout","split":"holdout","category":"일반지식·설명","prompt":"기준 자료에 따라 용어 A와 B의 차이를 설명해줘.","requirements":["A와 B를 비교한다."],"attachment":"이 자료에서 A는 입력이고 B는 출력이다.","response":"A는 출력이고 B는 입력입니다."},
+  {"id":"reason_holdout","split":"holdout","category":"추론·문제해결","prompt":"3보다 크고 5보다 작은 정수를 JSON 객체의 answer 키에 넣어줘.","requirements":["JSON 객체만 출력한다.","answer 키를 사용한다."],"expectedAnswer":"{\"answer\":4}","outputFormat":"json","checks":[{"kind":"json_keys","value":["answer"]}],"response":"{\"answer\":4}"}
+]

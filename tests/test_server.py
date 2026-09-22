@@ -4,20 +4,11 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from server import (  # noqa: E402
-    QUALITY_QUESTIONS,
-    connect,
-    evidence_questions,
-    extract_evidence,
-    extract_scores,
-    init_db,
-    load_env_file,
-    numbered_lines,
-    retrieve_evidence_candidates,
-)
+from server import connect, init_db, load_env_file, html_inspection
 
 
 class DatabaseTests(unittest.TestCase):
@@ -49,20 +40,17 @@ class DatabaseTests(unittest.TestCase):
             self.assertIn("evidence_json", columns)
 
 
-class ScoreParsingTests(unittest.TestCase):
-    def test_extract_scores_converts_probabilities_to_percent(self):
-        result = {"answers": {key: {"type": "noul", "noul": 0.825} for key in QUALITY_QUESTIONS}}
-        scores = extract_scores(result)
-        self.assertEqual(scores["overall_quality"], 82.5)
-        self.assertEqual(set(scores), set(QUALITY_QUESTIONS))
-
-    def test_extract_scores_rejects_missing_answer(self):
-        with self.assertRaisesRegex(RuntimeError, "판정 형식"):
-            extract_scores({"answers": {}})
-
-    def test_questions_are_json_serializable(self):
-        self.assertIn("critical_failure", json.loads(json.dumps(QUALITY_QUESTIONS)))
-
+class HTMLTests(unittest.TestCase):
+    def test_nested_tables_and_noncontent(self):
+        inspection = html_inspection('<head><style>CSS noise</style><title>Hidden title</title></head>'
+                                     '<h1>Title</h1><table><tr><td><ol><li>Step</li></ol>'
+                                     '<table><tr><td>Nested</td></tr></table>Tail</td></tr></table>'
+                                     '<p>Outside</p><script>secret()</script>')
+        blocks = {block['text']: block['in_table'] for block in inspection['blocks']}
+        self.assertEqual(blocks, {'Title': False, 'Step': True, 'Nested': True,
+                                  'Tail': True, 'Outside': False})
+        self.assertEqual(inspection['table_count'], 2)
+        self.assertFalse(inspection['rendered'])
 
 class EnvironmentTests(unittest.TestCase):
     def test_load_env_file_reads_quoted_value(self):
@@ -87,51 +75,6 @@ class EnvironmentTests(unittest.TestCase):
             finally:
                 os.environ.pop("JEV_TEST_KEY", None)
 
-
-class EvidenceTests(unittest.TestCase):
-    def test_numbered_lines_ignores_blanks_and_keeps_text(self):
-        self.assertEqual(
-            numbered_lines("첫 줄\n\n 둘째 줄 ", "E", 10),
-            {"E1": "첫 줄", "E2": "둘째 줄"},
-        )
-
-    def test_evidence_questions_offer_ids_and_none(self):
-        questions = evidence_questions({"A1": "주장"}, {"E1": "근거"}, {"A1": ["E1"]})
-        self.assertEqual(
-            questions["evidence_A1"]["criteria"]["SUPPORTED__E1"],
-            "candidate_evidence_lines의 E1 원문이 답변 줄을 직접 뒷받침함",
-        )
-        self.assertIn("NONE", questions["evidence_A1"]["criteria"])
-
-    def test_retrieval_limits_candidates_and_prefers_overlap(self):
-        candidates = retrieve_evidence_candidates(
-            {"A1": "파이썬 비동기 이벤트 루프"},
-            {
-                "E1": "이벤트 루프는 비동기 작업을 관리한다.",
-                "E2": "데이터베이스 인덱스 설명",
-                "E3": "파이썬 코루틴과 await 설명",
-            },
-            2,
-        )
-        self.assertEqual(candidates["A1"], ["E1", "E3"])
-
-    def test_evidence_questions_skip_lines_without_candidates(self):
-        questions = evidence_questions({"A1": "제목"}, {"E1": "근거"}, {"A1": []})
-        self.assertEqual(questions, {})
-
-    def test_extract_evidence_maps_id_back_to_original_text(self):
-        result = {
-            "answers": {
-                "evidence_A1": {
-                    "type": "choice",
-                    "choice": "SUPPORTED__E1",
-                    "confidence": 0.7,
-                },
-            }
-        }
-        evidence = extract_evidence(result, {"A1": "주장"}, {"E1": "원문 근거"})
-        self.assertEqual(evidence["claims"][0]["evidenceText"], "원문 근거")
-        self.assertEqual(evidence["claims"][0]["status"], "SUPPORTED")
 
 if __name__ == "__main__":
     unittest.main()

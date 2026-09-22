@@ -12,6 +12,17 @@
 }
 
 * { box-sizing: border-box; }
+.spec-fields { display: grid; gap: 14px; }
+.hint { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.check-label { display: flex; align-items: center; }
+.check-label input { width: auto; }
+dialog { width: min(900px, 95vw); max-height: 90vh; border: 1px solid var(--line); border-radius: 16px; padding: 24px; background: var(--panel); }
+dialog::backdrop { background: #0006; }
+dialog form { display: grid; gap: 16px; }
+details { margin-top: 12px; }
+summary { cursor: pointer; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.claim-card p { white-space: pre-wrap; overflow-wrap: anywhere; }
 body { margin: 0; background: var(--paper); color: var(--ink); }
 header { max-width: 1240px; margin: 0 auto; padding: 48px 28px 26px; display: flex; justify-content: space-between; gap: 24px; align-items: end; }
 h1 { font-family: Georgia, "Noto Serif KR", serif; font-size: clamp(38px, 6vw, 72px); line-height: .95; margin: 6px 0 12px; letter-spacing: -.045em; }

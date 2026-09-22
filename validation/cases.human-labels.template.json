@@ -1,0 +1,158 @@
+[
+  {
+    "id": "code_good",
+    "caseHash": "5528699419690b19c4938898cb36d759bf184067f345022eacf22a90a89b8208",
+    "reviewer": "",
+    "humanReviewed": false,
+    "axes": {
+      "instruction_following": null,
+      "truthfulness": null,
+      "response_length": null,
+      "style_clarity": null,
+      "safety": null
+    }
+  },
+  {
+    "id": "code_wrong",
+    "caseHash": "c6010590bd1a4d9bb6fd935cc8d9f9eb7b0e441df168ead7ad721bdd8c4d6534",
+    "reviewer": "",
+    "humanReviewed": false,
+    "axes": {
+      "instruction_following": null,
+      "truthfulness": null,
+      "response_length": null,
+      "style_clarity": null,
+      "safety": null
+    }
+  },
+  {
+    "id": "doc_good",
+    "caseHash": "b1295a0504711be56d4acba8e9d87f36d34a3faa6b3e32fb2f1d20eb557020f2",
+    "reviewer": "",
+    "humanReviewed": false,
+    "axes": {
+      "instruction_following": null,
+      "truthfulness": null,
+      "response_length": null,
+      "style_clarity": null,
+      "safety": null
+    }
+  },
+  {
+    "id": "doc_missing",
+    "caseHash": "3d13b353c81fc7fe3a0063e67eb4495dc66928023e1f132c10890ddda9da8a16",
+    "reviewer": "",
+    "humanReviewed": false,
+    "axes": {
+      "instruction_following": null,
+      "truthfulness": null,
+      "response_length": null,
+      "style_clarity": null,
+      "safety": null
+    }
+  },
+  {
+    "id": "knowledge_unverified",
+    "caseHash": "4ab52266278acf62f894efdd0f3ca7f9e62d9aced146985d88d92d097f1e8a32",
+    "reviewer": "",
+    "humanReviewed": false,
+    "axes": {
+      "instruction_following": null,
+      "truthfulness": null,
+      "response_length": null,
+      "style_clarity": null,
+      "safety": null
+    }
+  },
+  {
+    "id": "knowledge_repeated",
+    "caseHash": "d1f8e4edb84218224122104696dfe054c2a69f4b3429d6aad19838422750d5a6",
+    "reviewer": "",
+    "humanReviewed": false,
+    "axes": {
+      "instruction_following": null,
+      "truthfulness": null,
+      "response_length": null,
+      "style_clarity": null,
+      "safety": null
+    }
+  },
+  {
+    "id": "reason_good",
+    "caseHash": "eaa60fa6fee9f7128c2153ca3b4bde7c679abb7db598403179c8ed51cbc9a96a",
+    "reviewer": "",
+    "humanReviewed": false,
+    "axes": {
+      "instruction_following": null,
+      "truthfulness": null,
+      "response_length": null,
+      "style_clarity": null,
+      "safety": null
+    }
+  },
+  {
+    "id": "reason_wrong",
+    "caseHash": "8973c40fc6b61ff37aabc97071557b4c5c7c28027118cecfbe9c654a64478361",
+    "reviewer": "",
+    "humanReviewed": false,
+    "axes": {
+      "instruction_following": null,
+      "truthfulness": null,
+      "response_length": null,
+      "style_clarity": null,
+      "safety": null
+    }
+  },
+  {
+    "id": "code_holdout",
+    "caseHash": "ee4f930569489bd93491ef10a7bb2e89d03ab2564d96e99d0ecd0ce6dcd5e260",
+    "reviewer": "",
+    "humanReviewed": false,
+    "axes": {
+      "instruction_following": null,
+      "truthfulness": null,
+      "response_length": null,
+      "style_clarity": null,
+      "safety": null
+    }
+  },
+  {
+    "id": "doc_holdout",
+    "caseHash": "962a5dd084fa000bb6b001bf79c5365b287ce8b9e68b74058e96a382543492ac",
+    "reviewer": "",
+    "humanReviewed": false,
+    "axes": {
+      "instruction_following": null,
+      "truthfulness": null,
+      "response_length": null,
+      "style_clarity": null,
+      "safety": null
+    }
+  },
+  {
+    "id": "knowledge_holdout",
+    "caseHash": "275aaea82f9339c6604e1aedb465af0271a4f542da7ff9cc7c624e416f17c410",
+    "reviewer": "",
+    "humanReviewed": false,
+    "axes": {
+      "instruction_following": null,
+      "truthfulness": null,
+      "response_length": null,
+      "style_clarity": null,
+      "safety": null
+    }
+  },
+  {
+    "id": "reason_holdout",
+    "caseHash": "e8b2470a9ce88ff5d1dff221c68211cb456f4a3dee9cbbd4b6fd239352781d70",
+    "reviewer": "",
+    "humanReviewed": false,
+    "axes": {
+      "instruction_following": null,
+      "truthfulness": null,
+      "response_length": null,
+      "style_clarity": null,
+      "safety": null
+    }
+  }
+]

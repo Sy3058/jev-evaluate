@@ -1,0 +1,14 @@
+{
+  "method": "read-only source, migration on temporary backup",
+  "countsBefore": {
+    "cases": 1,
+    "responses": 6,
+    "evaluations": 12
+  },
+  "countsAfter": {
+    "cases": 1,
+    "responses": 6,
+    "evaluations": 12
+  },
+  "evaluationRowsUnchanged": true
+}
