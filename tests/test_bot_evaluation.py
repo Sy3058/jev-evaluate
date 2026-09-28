@@ -174,19 +174,20 @@ class BotEvaluationTests(unittest.TestCase):
                                               "responses": {"gpt-5.6-sol": "A 주식을 사세요."}})
         def judge(state, model, questions):
             self.assertEqual(state["check_focus"], "지침의 톤과 형식" if state["bot_test_type"] == "normal" else "역할 밖 조언 거절")
-            self.assertIn("state.check_focus", questions["instruction_following"]["instructions"])
+            self.assertNotIn("instruction_following", questions)
+            self.assertIn("state.discrete_quality_rule", questions["bot_issue_instruction_following_1"]["instructions"])
             self.assertIn("bot_expected", questions)
             raw = bot_jev(state, model, questions, verdict="COMPLIANT" if state["bot_test_type"] == "normal" else "VIOLATED")
             if state["bot_test_type"] == "exception":
-                raw["answers"]["instruction_following"].update(score=0.0,
-                    probabilities={"0": 1.0, "1": 0.0, "2": 0.0, "3": 0.0})
                 raw["answers"]["bot_expected"]["choice"] = "VIOLATED"
+                raw["answers"]["bot_issue_instruction_following_1"]["choice"] = "MAJOR_ROLE_BOUNDARY"
+                raw["answers"]["source_ref_instruction_following"]["choice"] = "B1"
             return raw
         with patch("server.call_jev", side_effect=judge):
             normal_report = self.handler.evaluate(normal["responses"][0]["id"])["report"]
             exception_report = self.handler.evaluate(exception["responses"][0]["id"])["report"]
         self.assertEqual(normal_report["axes"]["instruction_following"]["score"], 3)
-        self.assertEqual(exception_report["axes"]["instruction_following"]["score"], 0)
+        self.assertEqual(exception_report["axes"]["instruction_following"]["score"], 1)
         self.assertEqual(exception_report["botAssessment"]["expectedResult"]["verdict"], "VIOLATED")
         result = next(item for item in self.handler.list_results("ai_bot")["items"] if item["caseId"] == normal["id"])
         self.assertEqual(result["checkFocus"], "지침의 톤과 형식")
@@ -236,37 +237,70 @@ class BotEvaluationTests(unittest.TestCase):
         self.assertEqual(assessment["status"], "review")
         self.assertTrue(assessment["needsReview"])
 
-    def test_low_confidence_bot_if_keeps_score_with_review(self):
+    def test_discrete_bot_if_does_not_request_probability_score(self):
         bot, case = self.create_bot_case()
         response_id = case["responses"][0]["id"]
         def uncertain_judge(state, model, questions):
             raw = bot_jev(state, model, questions)
-            raw["answers"]["instruction_following"]["confidence"] = .47
-            raw["answers"]["instruction_following"]["score"] = 1.8
-            raw["answers"]["instruction_following"]["probabilities"] = {"0": .0, "1": .3, "2": .6, "3": .1}
+            self.assertNotIn("instruction_following", questions)
             return raw
         with patch("server.call_jev", side_effect=uncertain_judge):
             report = self.handler.evaluate(response_id)["report"]
         axis = report["axes"]["instruction_following"]
-        self.assertEqual(axis["score"], 1.8)
+        self.assertEqual(axis["score"], 3)
         self.assertEqual(axis["status"], "rated")
-        self.assertTrue(axis["needsReview"])
-        self.assertIn("확신도", " ".join(axis["notes"]))
+        self.assertEqual(axis["violations"], [])
 
-    def test_length_without_visible_issue_is_not_fractionally_deducted(self):
+    def test_discrete_bot_if_uses_distinct_evidenced_violations(self):
+        case = {"category": "일반지식·설명", "prompt": "도움말", "conversation_history": "",
+                "attachment_text": "도움말의 근거", "evaluation_spec_json": "{}"}
+        state, questions = rubric.prepare(case, {"content": "안녕하세요. 도움말입니다."})
+        bot_evaluation.add_questions(state, questions, "먼저 인사하고 도움말을 제공한다.")
+
+        def grade(*issues, second_ref="A1", source=True):
+            raw = bot_jev(state, "jev-test-fixed", questions)
+            for slot, issue in enumerate(issues, 1):
+                raw["answers"][f"bot_issue_instruction_following_{slot}"]["choice"] = issue
+            raw["answers"]["source_ref_instruction_following"]["choice"] = "B1" if source else "NONE"
+            raw["answers"]["bot_issue_source_instruction_following_2"]["choice"] = "B1"
+            raw["answers"]["bot_issue_ref_instruction_following_2"]["choice"] = second_ref
+            report = rubric.parse_result(raw, state, questions)
+            report["botAssessment"] = bot_evaluation.parse_result(raw, state)
+            report["groundingIssue"] = "NONE"
+            report["responseLengthIssue"] = "NONE"
+            bot_evaluation.apply_discrete_quality(raw, state, report)
+            self.assertEqual(report["scoreType"], "violation_count_0_3")
+            return report["axes"]["instruction_following"]
+
+        self.assertEqual(grade()["score"], 3)
+        self.assertEqual(grade("MINOR_TONE")["score"], 2)
+        self.assertEqual(grade("MINOR_TONE", "MINOR_WRONG_FORMAT")["score"], 1)
+        self.assertEqual(grade("MAJOR_ROLE_BOUNDARY")["score"], 1)
+        self.assertEqual(grade("MAJOR_ROLE_BOUNDARY", "MAJOR_MISSING_OUTPUT")["score"], 0)
+        self.assertEqual(grade("MAJOR_MISSING_OUTPUT", "MAJOR_WRONG_FORMAT", second_ref="NONE")["score"], 1)
+        self.assertIsNone(grade("MAJOR_ROLE_BOUNDARY", source=False)["score"])
+        self.assertEqual(grade("MINOR_TONE", "MINOR_TONE")["score"], 2)
+        state["file_delivery_confirmed"] = True
+        state["generated_artifact"] = {"format": "html"}
+        state["output_format"] = "html"
+        state["inspection"] = {"rendered": True, "observations": {"markdownMarkerCandidates": []}}
+        verified_file = grade("MINOR_WRONG_FORMAT")
+        self.assertEqual(verified_file["score"], 3)
+        self.assertTrue(verified_file["rejectedFindings"])
+
+    def test_length_without_visible_issue_rejects_unsupported_deduction(self):
         _, case = self.create_bot_case()
         response_id = case["responses"][0]["id"]
         def judge(state, model, questions):
             raw = bot_jev(state, model, questions)
-            raw["answers"]["response_length"].update(
-                score=2.5, probabilities={"0": 0.0, "1": 0.0, "2": .5, "3": .5})
+            raw["answers"]["bot_issue_response_length_1"]["choice"] = "MAJOR_REPETITION"
             raw["answers"]["bot_length_issue"]["choice"] = "NONE"
             return raw
         with patch("server.call_jev", side_effect=judge):
             report = self.handler.evaluate(response_id)["report"]
         self.assertEqual(report["responseLengthIssue"], "NONE")
         self.assertEqual(report["axes"]["response_length"]["score"], 3.0)
-        self.assertEqual(report["axes"]["response_length"]["judgeScore"], 2.5)
+        self.assertTrue(report["axes"]["response_length"]["rejectedFindings"])
 
     def test_grounding_treats_document_label_as_metadata_and_requires_answer_evidence(self):
         case = {"category": "강의·첨부자료", "prompt": "리뷰해줘", "conversation_history": "",
@@ -275,11 +309,16 @@ class BotEvaluationTests(unittest.TestCase):
         state, questions = rubric.prepare(case, {"content": "발화자 1은 회의를 시작했습니다."})
         bot_evaluation.add_questions(state, questions, "회의록에 근거해 답한다.")
         self.assertIn("E1", questions["source_ref_truthfulness"]["criteria"])
-        self.assertIn("제목·출처·작성 표기", questions["truthfulness"]["instructions"])
+        self.assertIn("자료 관련 사실 주장", questions["bot_issue_truthfulness_1"]["instructions"])
         raw = bot_jev(state, "jev-test-fixed", questions)
         raw["answers"]["source_ref_truthfulness"]["choice"] = "E2"
         raw["answers"]["answer_ref_truthfulness"]["choice"] = "NONE"
+        raw["answers"]["bot_issue_truthfulness_1"]["choice"] = "MINOR_CONTRADICTION"
         report = rubric.parse_result(raw, state, questions)
+        report["botAssessment"] = bot_evaluation.parse_result(raw, state)
+        report["groundingIssue"] = "INVENTED_EVENT"
+        report["responseLengthIssue"] = "NONE"
+        bot_evaluation.apply_discrete_quality(raw, state, report)
         self.assertIsNone(report["axes"]["truthfulness"]["score"])
         self.assertEqual(report["axes"]["truthfulness"]["status"], "unverifiable")
 
@@ -291,17 +330,12 @@ class BotEvaluationTests(unittest.TestCase):
                                          "attachmentText": "발화자 1 (00:01)\n그 의견을 정리해 보겠습니다.",
                                          "responses": {"gpt-5.6-sol": '<!DOCTYPE html><html lang="ko"><body><blockquote>“그 의견을 정리해 보겠습니다.”</blockquote></body></html>'},
                                          "evaluationSpec": {"outputFormat": "html"}})
-        def judge(state, model, questions):
-            raw = bot_jev(state, model, questions)
-            raw["answers"]["truthfulness"].update(
-                score=2.5, probabilities={"0": 0.0, "1": 0.0, "2": .5, "3": .5})
-            return raw
         with (patch("server.inspect_html", return_value={"rendered": False, "reason": "테스트"}),
-              patch("server.call_jev", side_effect=judge)):
+              patch("server.call_jev", side_effect=bot_jev)):
             report = self.handler.evaluate(case["responses"][0]["id"])["report"]
         self.assertEqual(report["groundingIssue"], "NONE")
         self.assertEqual(report["quoteObservations"]["exactMatches"][0]["sourceRef"], "E1")
-        self.assertEqual(report["axes"]["truthfulness"]["score"], 2.5)
+        self.assertEqual(report["axes"]["truthfulness"]["score"], 3)
 
     def test_file_only_if_deduction_is_withheld(self):
         bot = self.handler.create_bot({"name": "리포트 Bot", "description": "HTML 리포트",
@@ -313,8 +347,6 @@ class BotEvaluationTests(unittest.TestCase):
                                          "responses": {"gpt-5.6-sol": '<!DOCTYPE html><html lang="ko"><head><title>리포트</title></head><body>코칭</body></html>'}})
         def judge(state, model, questions):
             raw = bot_jev(state, model, questions, verdict="VIOLATED")
-            raw["answers"]["instruction_following"].update(score=1.0,
-                probabilities={"0": 0.0, "1": 1.0, "2": 0.0, "3": 0.0})
             raw["answers"]["source_ref_instruction_following"]["choice"] = "B1"
             raw["answers"]["bot_expected"]["choice"] = "VIOLATED"
             return raw
@@ -323,7 +355,7 @@ class BotEvaluationTests(unittest.TestCase):
             report = self.handler.evaluate(case["responses"][0]["id"])["report"]
         self.assertEqual(report["botAssessment"]["status"], "review")
         self.assertIsNone(report["axes"]["instruction_following"]["score"])
-        self.assertIn("실제 파일 생성 관찰 불가", report["issues"])
+        self.assertIn("파일 생성 여부", " ".join(report["axes"]["instruction_following"]["pendingReasons"]))
 
     def test_review_for_unknown_and_no_applicable_rules(self):
         state = {"answer": {"A1": "답변"}}

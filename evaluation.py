@@ -290,10 +290,21 @@ def parse_result(raw: dict, state: dict, questions: dict) -> dict:
             raise RuntimeError(f"JEV 확신도 형식 오류: {key}")
     axes = {}
     for key in LABELS:
-        answer = answers[key]
         choice = answers[f"status_{key}"]["choice"]
         answer_ref = answers.get(f"answer_ref_{key}", {}).get("choice", "NONE")
         source_ref = answers.get(f"source_ref_{key}", {}).get("choice", "NONE")
+        if state.get("discrete_quality_rule"):
+            status = "rated" if choice == "RATED" else "unverifiable" if choice == "UNKNOWN" else "not_applicable"
+            axes[key] = {"score": None, "status": status, "judgeChoice": choice,
+                         "description": questions[f"status_{key}"]["criteria"][choice],
+                         "dominantLevel": None, "confidence": None,
+                         "statusConfidence": answers[f"status_{key}"].get("confidence"),
+                         "probabilities": None, "answerRef": answer_ref,
+                         "answerText": state["answer"].get(answer_ref), "sourceRef": source_ref,
+                         "sourceText": state["sources"].get(source_ref) or state.get("bot_instructions", {}).get(source_ref),
+                         "notes": [], "needsReview": status != "rated"}
+            continue
+        answer = answers[key]
         notes = []
         status = "rated" if choice == "RATED" else "unverifiable" if choice == "UNKNOWN" else "not_applicable"
         score = answer["score"] if status == "rated" else None

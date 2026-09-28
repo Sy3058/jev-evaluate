@@ -88,11 +88,11 @@ class GeneratedFileTests(unittest.TestCase):
         self.assertTrue(state['file_delivery_confirmed'])
         self.assertIn('다운로드할 수 있다', state['artifact_observation'])
         self.assertIn('파일 다운로드를 제공했다는 증거', state['artifact_observation'])
-        self.assertIn('state.sources', questions['instruction_following']['instructions'])
-        self.assertIn('다운로드 링크 요구를 충족', questions['instruction_following']['instructions'])
-        self.assertIn('태그·스타일·메타데이터', questions['response_length']['instructions'])
+        self.assertIn('생성 파일이 업로드됐다면', questions['bot_issue_instruction_following_1']['instructions'])
+        self.assertIn('HTML 태그·CSS', questions['bot_issue_response_length_1']['instructions'])
+        self.assertNotIn('instruction_following', questions)
         self.assertNotIn('source_ref_response_length', questions)
-        self.assertNotIn('state.attachment_text', questions['instruction_following']['instructions'])
+        self.assertNotIn('state.attachment_text', questions['bot_issue_instruction_following_1']['instructions'])
         return bot_jev(state, model, questions)
 
 

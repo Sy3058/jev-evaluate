@@ -58,10 +58,10 @@ function axisCell(axis, scoreType) { return !axis ? '—' : axis.score === null 
 function reportDetails(report, botMode=false) {
   if (!report) return '';
   const axes = Object.entries(report.axes).map(([key,a])=>`<article class="claim-card"><b>${esc(config.criteria[key])}: ${axisCell(a, report.scoreType)}</b><p>${esc(a.description)}</p>
-    <p>JEV 확신도: ${typeof a.confidence === 'number' ? a.confidence.toFixed(2) : '미제공'} (정확도 보장 아님)</p>
+    ${report.scoreType === 'violation_count_0_3' ? `<p>확인된 위반: 경미 ${a.minorCount || 0}건 · 중대 ${a.majorCount || 0}건</p>${(a.violations || []).map(v=>`<details><summary>${v.severity === 'major' ? '중대' : '경미'} · ${esc(v.label)} · 답변 ${esc(v.answerRef)} / 기준 ${esc(v.sourceRef)}</summary><p>답변: ${esc(v.answerText || '필수 내용 누락')}</p><p>기준·자료: ${esc(v.sourceText || '해당 없음')}</p></details>`).join('')}` : `<p>JEV 확신도: ${typeof a.confidence === 'number' ? a.confidence.toFixed(2) : '미제공'} (정확도 보장 아님)</p>`}
     ${report.scoreType === 'expected_level_0_3' && a.status === 'rated' && a.probabilities ? `<p>단계별 확률: ${[0,1,2,3].map(n=>`${n}점 ${((a.probabilities[String(n)] || 0)*100).toFixed(1)}%`).join(' · ')}</p><p class="hint">점수는 단계별 확률의 가중 평균입니다. 표시된 설명은 가장 가능성 높은 단계 기준입니다.</p>` : ''}
-    ${a.answerText ? `<p>답변 ${esc(a.answerRef)}: ${esc(a.answerText)}</p>` : ''}
-    ${a.sourceText ? `<p>근거 ${esc(a.sourceRef)}: ${esc(a.sourceText)}</p>` : ''}
+    ${report.scoreType !== 'violation_count_0_3' && a.answerText ? `<p>답변 ${esc(a.answerRef)}: ${esc(a.answerText)}</p>` : ''}
+    ${report.scoreType !== 'violation_count_0_3' && a.sourceText ? `<p>근거 ${esc(a.sourceRef)}: ${esc(a.sourceText)}</p>` : ''}
     ${a.notes.map(n=>`<p class="hint">${esc(n)}</p>`).join('')}</article>`).join('');
   const requirements = report.requirements.map(r=>`<li>${esc(r.id)} ${esc(r.text)} — ${esc(requirementNames[r.status])}</li>`).join('');
   const checks = report.checks.map(c=>`<li>${esc(c.kind)}: ${c.passed?'통과':'실패'} ${esc(c.detail)}</li>`).join('');
@@ -71,7 +71,7 @@ function reportDetails(report, botMode=false) {
   const groundingNames = {NONE:'확인된 자료 불일치 없음',MISQUOTE:'원문과 다른 인용',INVENTED_EVENT:'자료에 없는 사실',WRONG_ATTRIBUTION:'귀속·시간 오류',OUTSIDE_SOURCE:'자료 밖 사실 사용',UNKNOWN:'대조 보류'};
   const lengthNames = {NONE:'확인된 분량 문제 없음',REPETITION:'본문 반복',IRRELEVANT:'무관한 설명',OVERCOMPRESSED:'과도한 압축',UNKNOWN:'본문 확인 불가'};
   const botEvidence = botMode ? `${report.groundingIssue ? `<p>자료 대조: ${esc(groundingNames[report.groundingIssue] || report.groundingIssue)} · 원문 일치 인용 ${report.quoteObservations?.exactMatches?.length || 0}건 · 확인 필요 인용 ${report.quoteObservations?.unmatchedQuotes?.length || 0}건</p>` : ''}${report.responseLengthIssue ? `<p>본문 분량: ${esc(lengthNames[report.responseLengthIssue] || report.responseLengthIssue)}</p>` : ''}` : '';
-  return `<details><summary>판정·근거·검사 보기</summary><p>평가 신뢰성: 미검증 · 종합 순위 미산출 · ${report.scoreType === 'expected_level_0_3' ? 'Score 확률 가중 평균' : '기존 단계 선택'}</p>${report.issues.map(s=>`<p>${esc(s)}</p>`).join('')}
+  return `<details><summary>판정·근거·검사 보기</summary><p>평가 신뢰성: 미검증 · 종합 순위 미산출 · ${report.scoreType === 'expected_level_0_3' ? 'Score 확률 가중 평균' : report.scoreType === 'violation_count_0_3' ? '확인된 위반 개수·심각도에 따른 정수 점수' : '기존 단계 선택'}</p>${report.issues.map(s=>`<p>${esc(s)}</p>`).join('')}
     ${botEvidence}${!botMode && requirements ? `<ul>${requirements}</ul>` : ''}${checks ? `<ul>${checks}</ul>` : ''}${sources ? `<details><summary>등록 근거 목록</summary><ul>${sources}</ul></details>` : ''}${render ? `<p>HTML 렌더링: ${render.rendered?'관측 완료':'미완료'} ${esc(render.reason || render.limitation || '')} ${screenshot}</p>` : ''}
     ${report.executionDetails ? `<p>코드 실행: ${esc(report.executionDetails.status)} ${esc(report.executionDetails.reason || report.executionDetails.scope || '')}</p>` : ''}<div class="claim-list">${axes}</div><p>입력 해시: ${esc(report.inputHash)}</p></details>`;
 }

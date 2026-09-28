@@ -770,81 +770,9 @@ class AppHandler(SimpleHTTPRequestHandler):
             report["inspection"] = full_inspection
         if bot_row:
             report["botAssessment"] = bot_evaluation.parse_result(result, state)
-            grounding_answer = result["answers"]["bot_grounding_issue"]
-            grounding_issue = grounding_answer["choice"]
-            report["groundingIssue"] = grounding_issue
+            report["groundingIssue"] = result["answers"]["bot_grounding_issue"]["choice"]
             report["quoteObservations"] = state["quote_observations"]
-            truth_axis = report["axes"]["truthfulness"]
-            verified_quotes = state["quote_observations"]["exactMatches"]
-            unmatched_quotes = state["quote_observations"]["unmatchedQuotes"]
-            if grounding_issue == "NONE" and verified_quotes and not unmatched_quotes and truth_axis["judgeChoice"] == "RATED":
-                first_quote = verified_quotes[0]
-                answer_id = next((key for key, value in state["answer"].items()
-                                  if first_quote["quote"] in value), None)
-                if answer_id:
-                    truth_axis["judgeScore"] = result["answers"]["truthfulness"]["score"]
-                    truth_axis["judgeProbabilities"] = result["answers"]["truthfulness"]["probabilities"]
-                    truth_axis["score"] = result["answers"]["truthfulness"]["score"]
-                    truth_axis["status"] = "rated"
-                    truth_axis["probabilities"] = result["answers"]["truthfulness"]["probabilities"]
-                    truth_axis["dominantLevel"] = max(range(4), key=lambda level: truth_axis["probabilities"][str(level)])
-                    truth_axis["description"] = rubric.LEVELS["truthfulness"][truth_axis["dominantLevel"]]
-                    truth_axis["answerRef"] = answer_id
-                    truth_axis["answerText"] = state["answer"][answer_id]
-                    truth_axis["sourceRef"] = first_quote["sourceRef"]
-                    truth_axis["sourceText"] = state["sources"][first_quote["sourceRef"]]
-                    truth_axis["notes"].append("표시된 인용은 업로드 자료의 원문과 일치합니다. 이는 다른 주장이나 해석 전체의 정확성을 보증하지 않습니다.")
-                    truth_axis["needsReview"] = truth_axis["needsReview"] or grounding_answer.get("confidence", 0) < .7
-            elif grounding_issue == "UNKNOWN" or (grounding_issue == "NONE" and unmatched_quotes):
-                truth_axis["score"] = None
-                truth_axis["status"] = "unverifiable"
-                truth_axis["dominantLevel"] = None
-                truth_axis["description"] = "업로드 자료와의 대조가 부족해 사실성 판단을 보류했습니다."
-                truth_axis["needsReview"] = True
-                report["needsReview"] = True
-            length_issue = result["answers"]["bot_length_issue"]["choice"]
-            report["responseLengthIssue"] = length_issue
-            length_axis = report["axes"]["response_length"]
-            if length_issue == "NONE" and length_axis["status"] == "rated":
-                if length_axis["score"] != 3:
-                    length_axis["judgeScore"] = length_axis["score"]
-                    length_axis["judgeProbabilities"] = length_axis["probabilities"]
-                    length_axis["notes"].append("보이는 본문에서 구체적인 분량 문제가 없다고 판정되어 불확실성만으로 낮아진 평균을 3점으로 바로잡았습니다.")
-                length_axis["score"] = 3.0
-                length_axis["probabilities"] = {"0": 0.0, "1": 0.0, "2": 0.0, "3": 1.0}
-                length_axis["dominantLevel"] = 3
-                length_axis["description"] = rubric.LEVELS["response_length"][3]
-            elif length_issue == "UNKNOWN" and length_axis["score"] is not None:
-                length_axis["score"] = None
-                length_axis["status"] = "unverifiable"
-                length_axis["dominantLevel"] = None
-                length_axis["description"] = "화면에 보이는 리포트 본문의 분량을 확인할 수 없어 판단을 보류했습니다."
-                length_axis["notes"].append("HTML 코드 길이만으로 응답 분량을 평가하지 않습니다.")
-                length_axis["needsReview"] = True
-                report["issues"].append("리포트 본문 분량 관찰 불가")
-                report["needsReview"] = True
-            bot_if = report["axes"]["instruction_following"]
-            assessment_status = report["botAssessment"]["status"]
-            artifact_if_conflict = (state["artifact_verification_pending"] and
-                                    any(rule["id"] == bot_if["sourceRef"] and rule["reason"].startswith("파일 생성 여부")
-                                        for rule in report["botAssessment"]["rules"]))
-            verdict_if_conflict = ((assessment_status in {"violation", "expectation_mismatch"} and
-                                    bot_if["score"] is not None and bot_if["score"] > 1.5) or
-                                   (assessment_status == "compliant" and bot_if["score"] is not None and
-                                    bot_if["score"] <= 1.5))
-            if bot_if["score"] is not None and (artifact_if_conflict or verdict_if_conflict):
-                bot_if["score"] = None
-                bot_if["status"] = "unverifiable"
-                bot_if["dominantLevel"] = None
-                bot_if["description"] = ("실제 파일 생성 여부를 확인할 수 없어 IF 판단을 보류했습니다." if artifact_if_conflict else
-                                         "IF 점수와 Bot 지침·기대 결과 판정이 충돌하여 판단을 보류했습니다.")
-                bot_if["notes"].append("HTML 텍스트의 내용은 평가할 수 있지만 실제 파일 생성은 확인할 수 없습니다." if artifact_if_conflict else
-                                       "IF와 지침·기대 결과 판정이 충돌합니다. 사람이 검토한 뒤 재평가하세요.")
-                bot_if["needsReview"] = True
-                report["issues"].append("실제 파일 생성 관찰 불가" if artifact_if_conflict else
-                                        "AI Bot IF와 지침·기대 결과 판정이 충돌")
-                report["needsReview"] = True
-            report["needsReview"] = report["needsReview"] or report["botAssessment"]["needsReview"]
+            report["responseLengthIssue"] = result["answers"]["bot_length_issue"]["choice"]
             report["botVersion"] = case["bot_version"]
             report["botName"] = bot_row["name"]
             report["botInstructions"] = bot_row["instructions"]
@@ -852,6 +780,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             report["expectedBehavior"] = case["expected_behavior"]
             report["checkFocus"] = case["check_focus"]
             report["inputExample"] = case["input_example"]
+            bot_evaluation.apply_discrete_quality(result, state, report)
             report["rubricVersion"] = bot_evaluation.QUALITY_VERSION
         report["settingsHash"] = settings_digest(case, spec)
         report["artifactSha256"] = artifact["sha256"] if artifact else None
@@ -1011,7 +940,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                   "artifact_filename", "artifact_format", "artifact_size", "artifact_sha256", "artifact_text_truncated",
                   "score_type", "evaluator_model", "evaluated_at", "stale", "needs_review", "input_hash"]
         fields += [field for key in rubric.LABELS for field in (key, key + "_status", key + "_confidence")]
-        fields += ["report_json", "legacy_scores_json"]
+        fields += ["quality_violations_json", "quality_pending_json", "report_json", "legacy_scores_json"]
         writer = csv.DictWriter(output, fieldnames=fields)
         writer.writeheader()
         for item in self.list_results(mode, bot_id)["items"]:
@@ -1035,6 +964,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                    "rubric_version": item["rubricVersion"], "score_type": report.get("scoreType", "legacy"),
                    "evaluator_model": item["evaluatorModel"], "evaluated_at": item["evaluatedAt"],
                    "stale": item["stale"], "needs_review": report.get("needsReview"), "input_hash": report.get("inputHash"),
+                   "quality_violations_json": json.dumps({key: axis.get("violations", []) for key, axis in report.get("axes", {}).items()}, ensure_ascii=False),
+                   "quality_pending_json": json.dumps({key: axis.get("pendingReasons", []) for key, axis in report.get("axes", {}).items()}, ensure_ascii=False),
                    "report_json": json.dumps(report, ensure_ascii=False),
                    "legacy_scores_json": json.dumps(item["scores"], ensure_ascii=False) if not report else ""}
             for key, axis in report.get("axes", {}).items():
