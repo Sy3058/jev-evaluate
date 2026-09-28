@@ -26,13 +26,16 @@ def metrics(runs, labels):
     gold={x['id']:x for x in labels if x.get('humanReviewed') is True and x.get('reviewer')}
     grouped=defaultdict(list)
     repeats=defaultdict(list)
+    repeat_scores=defaultdict(list)
     # Use first run only for human agreement, avoiding pseudoreplication.
     seen=set()
     for run in runs:
         if 'report' not in run:
             continue
         for axis,item in run['report']['axes'].items():
-            repeats[(run['id'],axis)].append((item['status'],item['score']))
+            level=item.get('dominantLevel',item['score'])
+            repeats[(run['id'],axis)].append((item['status'],level))
+            repeat_scores[(run['id'],axis)].append(item['score'])
         if run['id'] in seen or run['split']!='holdout' or run['id'] not in gold:
             continue
         if not run.get('caseHash') or gold[run['id']].get('caseHash') != run['caseHash']:
@@ -40,7 +43,8 @@ def metrics(runs, labels):
         seen.add(run['id'])
         for axis,expected in gold[run['id']].get('axes',{}).items():
             if axis in rubric.LABELS and type(expected) is int and 0<=expected<=3:
-                grouped[(run['category'],axis)].append((expected,run['report']['axes'][axis]['score']))
+                item=run['report']['axes'][axis]
+                grouped[(run['category'],axis)].append((expected,item.get('dominantLevel',item['score'])))
     groups=[]
     for category in rubric.CATEGORIES:
         for axis in rubric.LABELS:
@@ -57,8 +61,12 @@ def metrics(runs, labels):
     repeat_pairs=[values for values in repeats.values() if len(values)>=3]
     stable=sum(all(v==values[0] for v in values) for values in repeat_pairs)
     repeat_agreement=stable/len(repeat_pairs) if repeat_pairs else None
+    score_ranges=[round(max(values)-min(values),4) for values in repeat_scores.values()
+                  if len(values)>=3 and all(v is not None for v in values)]
     return {'groups':groups,'humanLabeledHoldoutCases':len(seen),
             'repeatGroups':len(repeat_pairs),'repeatAgreement':repeat_agreement,
+            'repeatScoreRangeMean':sum(score_ranges)/len(score_ranges) if score_ranges else None,
+            'repeatScoreRangeMax':max(score_ranges) if score_ranges else None,
             'reliability':'not_validated',
             'automaticThresholdsMet':all(g['pass'] for g in groups) and repeat_agreement is not None and repeat_agreement>=.95,
             'note':'중요 오류/안전 사례의 충분성과 독립 라벨을 사람이 검토한 후 사용 범위를 승인해야 합니다. 소표본/AI 작성 예제는 신뢰성 입증이 아닙니다.'}

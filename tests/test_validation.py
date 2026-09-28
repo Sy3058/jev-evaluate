@@ -39,3 +39,15 @@ class ValidationTests(unittest.TestCase):
         low,high=wilson(1,1)
         self.assertLess(low,.3)
         self.assertEqual(high,1)
+
+    def test_fractional_score_uses_dominant_level_for_stage_agreement(self):
+        labels=[{'id':'x','reviewer':'human','humanReviewed':True,'caseHash':'hash','axes':{'truthfulness':3}}]
+        runs=[]
+        for score in (2.60,2.90,2.75):
+            run=self.run_case(score)
+            run['report']['axes']['truthfulness']['dominantLevel']=3
+            runs.append(run)
+        result=metrics(runs,labels)
+        group=next(g for g in result['groups'] if g['category']=='코딩' and g['axis']=='truthfulness')
+        self.assertEqual(group['agreement'],1)
+        self.assertEqual(result['repeatScoreRangeMax'],.3)

@@ -34,6 +34,8 @@ p { margin: 0; }
 .status.ready::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #33a474; margin-right: 8px; }
 .status.error::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--orange); margin-right: 8px; }
 nav { max-width: 1240px; margin: 0 auto; padding: 0 28px; border-bottom: 1px solid var(--line); }
+.mode-nav { border-bottom: 0; }
+.mode-nav .tab { font-size: 17px; padding-top: 20px; }
 .tab { border: 0; border-bottom: 3px solid transparent; background: transparent; padding: 15px 3px 12px; margin-right: 28px; font: inherit; color: var(--muted); cursor: pointer; }
 .tab.active { color: var(--ink); border-color: var(--green); font-weight: 700; }
 main { max-width: 1240px; margin: 0 auto; padding: 28px; }
@@ -45,6 +47,8 @@ main { max-width: 1240px; margin: 0 auto; padding: 28px; }
 .intro-panel > p, .section-heading p { color: var(--muted); font-size: 14px; }
 .step { width: 42px; height: 42px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 12px; background: var(--lime); color: #263412; font-family: ui-monospace, monospace; font-weight: 800; }
 .form-grid { padding: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+#bot-select-slot { display: grid; gap: 16px; }
+#edit-bot-scenario { display: grid; gap: 14px; margin: 16px 0; }
 label { display: grid; gap: 8px; font-size: 13px; font-weight: 750; }
 label span { color: var(--muted); font-weight: 400; }
 .full { grid-column: 1 / -1; }
@@ -54,6 +58,9 @@ input:focus, textarea:focus, select:focus { outline: 3px solid rgba(203, 231, 93
 .response-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .response-card { padding: 18px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; }
 .response-card textarea { margin-top: 10px; min-height: 190px; }
+.artifact-input { margin-top: 14px; }
+.artifact-input input { font-weight: 400; }
+.file-action { display: inline-block; width: auto; margin-left: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 10px 15px; color: var(--ink); font-size: 14px; font-weight: 700; cursor: pointer; white-space: nowrap; }
 .model-chip { display: inline-flex; background: #e5eadf; border-radius: 999px; padding: 6px 10px; font: 700 12px ui-monospace, monospace; }
 .actions { display: flex; gap: 10px; align-items: center; justify-content: flex-end; margin-top: 20px; }
 button, .button { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); padding: 10px 15px; font: 700 14px inherit; text-decoration: none; cursor: pointer; }
@@ -85,6 +92,40 @@ button:disabled { opacity: .55; cursor: wait; }
 .claim-card p { font-size: 12px; line-height: 1.55; }
 .evidence-quote { display: grid; grid-template-columns: auto 1fr; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 11px; line-height: 1.5; color: var(--muted); }
 .table-wrap { overflow-x: auto; }
+[hidden] { display: none !important; }
+.case-row > td { vertical-align: top; }
+.case-row p, .case-row small { display: block; margin: 5px 0 0 28px; color: var(--muted); }
+.case-prompt { max-width: 560px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.case-toggle { display: inline-flex; align-items: center; gap: 10px; padding: 0; border: 0; background: transparent; text-align: left; }
+.case-toggle[aria-expanded="true"] .case-chevron { transform: rotate(90deg); }
+.case-chevron { display: inline-block; color: var(--green); transition: transform .15s; }
+.case-actions { white-space: nowrap; }
+.case-actions button + button, .model-results button + button { margin-left: 6px; }
+.case-details > td { padding: 0 16px 18px; background: #f8f7f1; }
+.case-detail-wrap { overflow-x: auto; }
+.model-results { min-width: 780px; background: var(--panel); }
+.model-results.bot-results { min-width: 520px; }
+.model-results th, .model-results td { padding: 10px 12px; }
+.model-evidence td { padding-top: 0; color: var(--muted); }
+.bot-assessment { margin: 12px 0; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: #f3f7ed; color: var(--ink); }
+.bot-assessment summary { cursor: pointer; font-weight: 700; }
+.scenario-summary { margin: 14px 0; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: #fff; white-space: pre-wrap; overflow-wrap: anywhere; }
+.scenario-summary p { margin: 8px 0 0; }
+.scenario-summary b { margin-right: 8px; }
+.bot-rules { display: grid; gap: 8px; margin-top: 10px; }
+.bot-rules .claim-card { border-left-color: var(--green); }
+.bot-rules .claim-card p { margin-top: 7px; }
+.quality-heading { margin-top: 14px; color: var(--ink); font-weight: 700; }
+.quality-scores { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.quality-scores > div { min-width: 125px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: white; }
+.quality-scores dt { font-size: 11px; color: var(--muted); }
+.quality-scores dd { margin: 4px 0 0; font-weight: 700; color: var(--ink); }
+.bot-list { display: grid; gap: 12px; margin-top: 18px; }
+.bot-card { padding: 20px; display: flex; justify-content: space-between; gap: 16px; }
+.bot-card h3 { margin: 0 0 8px; }
+.bot-card p, .bot-card small { color: var(--muted); }
+.bot-card .actions { margin: 0; align-self: flex-start; }
+#bot-instruction-preview { white-space: pre-wrap; max-height: 180px; overflow: auto; color: var(--muted); font-weight: 400; }
 table { width: 100%; border-collapse: collapse; min-width: 920px; }
 th, td { text-align: left; padding: 14px 16px; border-bottom: 1px solid var(--line); font-size: 13px; }
 th { color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
@@ -101,5 +142,6 @@ td.model { font: 700 12px ui-monospace, monospace; }
   .intro-panel, .results-toolbar { align-items: flex-start; flex-direction: column; gap: 16px; }
   .results-toolbar .actions { align-items: stretch; flex-direction: column; width: 100%; }
   .form-grid, .response-grid, .summary-grid { grid-template-columns: 1fr; }
+  .bot-card { flex-direction: column; }
   .full { grid-column: auto; }
 }

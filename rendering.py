@@ -15,7 +15,7 @@ def inspect_html(content: str, output_dir: Path) -> dict:
         return {"rendered": False, "reason": "Playwright 미설치", "method": "unavailable"}
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, chromium_sandbox=True)
+            browser = p.chromium.launch(headless=True)
             try:
                 context = browser.new_context(java_script_enabled=False, service_workers="block",
                                               accept_downloads=False, viewport={"width": 1280, "height": 900})

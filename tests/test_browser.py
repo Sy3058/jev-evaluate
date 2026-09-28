@@ -6,9 +6,11 @@ from pathlib import Path
 from unittest.mock import patch
 from http.server import ThreadingHTTPServer
 
+import evaluation as rubric
 from rendering import inspect_html
 from server import AppHandler, init_db
 from test_evaluation import fake_jev
+from test_bot_evaluation import bot_jev
 
 try:
     from playwright.sync_api import sync_playwright, expect
@@ -18,6 +20,93 @@ except ImportError:
 
 @unittest.skipUnless(sync_playwright, 'Playwright 미설치: 브라우저 검증 미실행')
 class BrowserTests(unittest.TestCase):
+    def test_ai_bot_create_evaluate_and_version(self):
+        os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH',str(Path(__file__).resolve().parents[1]/'.browsers'))
+        with tempfile.TemporaryDirectory() as directory:
+            class Handler(AppHandler):
+                db_path=Path(directory)/'test.db'
+                def log_message(self,*args): pass
+            init_db(Handler.db_path)
+            http=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+            thread=threading.Thread(target=http.serve_forever,daemon=True); thread.start()
+            try:
+                with patch('server.call_jev',side_effect=lambda *args: bot_jev(*args,verdict='VIOLATED')), sync_playwright() as p:
+                    browser=p.chromium.launch(headless=True)
+                    try:
+                        page=browser.new_page()
+                        errors=[]; page.on('pageerror',lambda e: errors.append(str(e)))
+                        page.goto(f'http://127.0.0.1:{http.server_port}')
+                        expect(page.locator('#bot-select-wrap')).to_have_count(0)
+                        page.get_by_role('button',name='AI Bot 평가').click()
+                        expect(page.locator('#bot-select-wrap')).to_be_visible()
+                        expect(page.locator('#input-mode-heading')).to_have_text('AI Bot 평가 질문')
+                        page.get_by_role('button',name='모델 평가').click()
+                        expect(page.locator('#bot-select-wrap')).to_have_count(0)
+                        expect(page.locator('#input-mode-heading')).to_have_text('모델 평가 질문')
+                        page.locator('[name=title]').fill('모델 전환 검증')
+                        page.locator('[name=prompt]').fill('2+2는?')
+                        page.locator('[name="response:gpt-5.6-sol"]').fill('4')
+                        page.get_by_role('button',name='케이스 저장').click()
+                        expect(page.locator('#toast')).to_contain_text('저장했습니다')
+                        model_items=page.request.get(f'http://127.0.0.1:{http.server_port}/api/results?mode=model').json()['items']
+                        self.assertEqual(model_items[0]['evaluationMode'],'model')
+                        self.assertIsNone(model_items[0]['botId'])
+                        page.get_by_role('button',name='AI Bot 평가').click()
+                        page.get_by_role('button',name='AI Bot 관리').click()
+                        page.locator('#bot-form [name=name]').fill('상담 Bot')
+                        page.locator('#bot-form [name=description]').fill('인사하는 Bot')
+                        page.locator('#bot-form [name=instructions]').fill('먼저 인사한다.')
+                        page.locator('#bot-form button[type=submit]').click()
+                        expect(page.locator('#bot-list')).to_contain_text('상담 Bot')
+                        page.get_by_role('button',name='답변 입력').click()
+                        page.locator('#bot-select').select_option(label='상담 Bot · v1')
+                        expect(page.locator('#bot-instruction-preview')).to_contain_text('먼저 인사한다.')
+                        page.locator('[name=title]').fill('Bot 검증')
+                        page.locator('[name=prompt]').fill('도움말을 알려줘')
+                        page.locator('#case-form [name=checkFocus]').fill('인사 여부')
+                        page.locator('#case-form [name=expectedBehavior]').fill('먼저 인사한다.')
+                        page.locator('[name="response:gpt-5.6-sol"]').fill('도움말입니다.')
+                        page.locator('[data-artifact-model="gpt-5.6-sol"]').set_input_files({
+                            'name':'코칭.html','mimeType':'text/html',
+                            'buffer':b'<!DOCTYPE html><html lang="ko"><body>report</body></html>'})
+                        page.get_by_role('button',name='케이스 저장').click()
+                        page.get_by_role('button',name='결과 분석').click()
+                        expect(page.locator('#result-rows .case-row')).to_contain_text('상담 Bot · 지침 v1')
+                        artifact_item=page.request.get(f'http://127.0.0.1:{http.server_port}/api/results?mode=ai_bot').json()['items'][0]
+                        self.assertEqual(artifact_item['artifact']['filename'],'코칭.html')
+                        download_url=f'http://127.0.0.1:{http.server_port}'+artifact_item['artifact']['downloadUrl']
+                        self.assertIn(b'report',page.request.get(download_url).body())
+                        page.locator('[data-evaluate-case]').click()
+                        expect(page.locator('#result-rows .case-row')).to_contain_text('지침 위반')
+                        if page.locator('#result-rows .case-details').get_attribute('hidden') is not None:
+                            page.locator('[data-case-toggle]').click()
+                        expect(page.locator('.model-results th')).to_have_count(8)
+                        expect(page.locator('.scenario-summary')).to_contain_text('인사 여부')
+                        expect(page.locator('.scenario-summary')).to_contain_text('먼저 인사한다.')
+                        expect(page.locator('.model-evidence')).to_contain_text('코칭.html')
+                        expect(page.locator('.bot-assessment')).not_to_have_attribute('open', '')
+                        page.locator('.bot-assessment summary').click()
+                        expect(page.locator('.bot-assessment')).to_contain_text('먼저 인사한다.')
+                        page.locator('[data-upload-for]').set_input_files({
+                            'name':'수정.html','mimeType':'text/html',
+                            'buffer':b'<!DOCTYPE html><html lang="ko"><body>updated</body></html>'})
+                        expect(page.locator('#result-rows .case-details')).to_contain_text('생성 파일 변경')
+                        page.get_by_role('button',name='AI Bot 관리').click()
+                        page.locator('[data-edit-bot]').click()
+                        page.locator('#bot-form [name=instructions]').fill('한 문장으로 답한다.')
+                        page.locator('#bot-form button[type=submit]').click()
+                        expect(page.locator('#bot-list')).to_contain_text('v2')
+                        page.get_by_role('button',name='결과 분석').click()
+                        expect(page.locator('#result-rows .case-row')).to_contain_text('지침 v1')
+                        page.locator('[data-update-bot-version]').click()
+                        expect(page.locator('#result-rows .case-row')).to_contain_text('재평가 필요')
+                        expect(page.locator('#result-rows .case-details')).to_contain_text('Bot 지침 버전 변경')
+                        self.assertEqual(errors,[])
+                    finally:
+                        browser.close()
+            finally:
+                http.shutdown(); http.server_close(); thread.join()
+
     def test_render_hidden_content_and_no_script_execution(self):
         with tempfile.TemporaryDirectory() as directory:
             result=inspect_html('<p>Visible</p><p style="display:none">Hidden</p>'
@@ -40,7 +129,7 @@ class BrowserTests(unittest.TestCase):
             thread=threading.Thread(target=http.serve_forever,daemon=True); thread.start()
             try:
                 with patch('server.call_jev',side_effect=fake_jev), sync_playwright() as p:
-                    browser=p.chromium.launch(headless=True,chromium_sandbox=True)
+                    browser=p.chromium.launch(headless=True)
                     try:
                         page=browser.new_page()
                         errors=[]; page.on('pageerror',lambda e: errors.append(str(e)))
@@ -51,20 +140,27 @@ class BrowserTests(unittest.TestCase):
                         expect(page.locator('#new-requirements')).to_be_hidden()
                         expect(page.locator('#new-confirmed')).to_have_count(0)
                         page.locator('[name="response:gpt-5.6-sol"]').fill('4')
+                        page.locator('[name="response:gpt-5.6-terra"]').fill('4')
                         page.get_by_role('button',name='케이스 저장',exact=True).click()
                         expect(page.locator('#toast')).to_contain_text('저장했습니다')
                         page.get_by_role('button',name='결과 분석',exact=True).click()
-                        page.locator('[data-evaluate]').click()
-                        expect(page.locator('#result-rows')).to_contain_text('3 / 3')
-                        page.locator('[data-history]').click()
+                        expect(page.locator('#result-rows .case-row')).to_have_count(1)
+                        expect(page.locator('#result-rows .case-details')).to_be_hidden()
+                        page.locator('[data-case-toggle]').click()
+                        expect(page.locator('#result-rows .model-results tbody tr.model-evidence')).to_have_count(2)
+                        page.locator('[data-evaluate-case]').click()
+                        expect(page.locator('#result-rows .case-row')).to_contain_text('2/2개 현재 평가')
+                        expect(page.locator('#result-rows .case-details')).to_be_visible()
+                        expect(page.locator('#result-rows')).to_contain_text('3.00 / 3')
+                        page.locator('[data-history]').first.click()
                         expect(page.locator('#history-dialog')).to_be_visible()
-                        expect(page.locator('#history-content')).to_contain_text('five-axis-v2')
+                        expect(page.locator('#history-content')).to_contain_text(rubric.VERSION)
                         page.locator('#close-history').click()
                         page.locator('[data-settings]').click()
                         page.locator('#edit-spec').get_by_text('추가 평가 기준 (선택)',exact=True).click()
                         page.locator('#edit-requirements').fill('변경된 요구사항')
                         page.locator('#settings-form').get_by_role('button',name='저장',exact=True).click()
-                        expect(page.locator('#result-rows')).to_contain_text('설정 변경')
+                        expect(page.locator('#result-rows')).to_contain_text('공통 설정 변경')
                         self.assertEqual(errors,[])
                     finally:
                         browser.close()

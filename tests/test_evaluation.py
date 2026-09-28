@@ -10,14 +10,18 @@ from unittest.mock import patch
 from http.server import ThreadingHTTPServer
 
 import evaluation as rubric
-from server import AppHandler, connect, init_db
+from server import AppHandler, EvaluationInProgress, connect, init_db
 
 
 def fake_jev(state, model, questions):
     answers = {}
     for key, question in questions.items():
+        if question['type'] == 'score':
+            answers[key] = {'score': 3.0, 'confidence': .95,
+                            'probabilities': {'0': 0.0, '1': 0.0, '2': 0.0, '3': 1.0}}
+            continue
         choices = question['criteria']
-        preferred = 'L3' if key in rubric.LABELS else 'MET' if key.startswith('requirement_') else 'A1' if key.startswith('answer_ref_') else 'E1'
+        preferred = 'RATED' if key.startswith('status_') else 'MET' if key.startswith('requirement_') else 'A1' if key.startswith('answer_ref_') else 'E1'
         choice = preferred if preferred in choices else 'NONE'
         answers[key] = {'choice': choice, 'confidence': .95}
     return {'model': 'jev-test-fixed', 'answers': answers}
@@ -52,9 +56,29 @@ class RubricTests(unittest.TestCase):
 
     def test_invalid_ids_and_nonfinite_confidence_rejected(self):
         state,questions=rubric.prepare(case(),{'content':'x는 2'})
-        for key, change in [('answer_ref_truthfulness',{'choice':'A999'}),('truthfulness',{'confidence':float('nan')}),('truthfulness',{'choice':'99'})]:
+        for key, change in [('answer_ref_truthfulness',{'choice':'A999'}),('truthfulness',{'confidence':float('nan')}),('truthfulness',{'score':99})]:
             raw=fake_jev(state,'fixed',questions); raw['answers'][key].update(change)
             with self.assertRaises(RuntimeError): rubric.parse_result(raw,state,questions)
+
+    def test_score_distinguishes_same_top_level(self):
+        state,questions=rubric.prepare(case(),{'content':'x는 2'})
+        observed=[]
+        for p2,p3 in [(0.4,0.6),(0.1,0.9)]:
+            raw=fake_jev(state,'fixed',questions)
+            raw['answers']['instruction_following'].update(
+                score=2*p2+3*p3, probabilities={'0':0.0,'1':0.0,'2':p2,'3':p3})
+            axis=rubric.parse_result(raw,state,questions)['axes']['instruction_following']
+            self.assertEqual(axis['dominantLevel'],3)
+            observed.append(axis['score'])
+        self.assertAlmostEqual(observed[0],2.6)
+        self.assertAlmostEqual(observed[1],2.9)
+
+    def test_score_probability_mismatch_rejected(self):
+        state,questions=rubric.prepare(case(),{'content':'x는 2'})
+        raw=fake_jev(state,'fixed',questions)
+        raw['answers']['instruction_following']['score']=2.5
+        with self.assertRaisesRegex(RuntimeError,'불일치'):
+            rubric.parse_result(raw,state,questions)
 
     def test_soft_wrapping_not_equal_weight_units(self):
         self.assertEqual(rubric.draft_requirements('목적을 설명하고\n절차를 표로 정리한다.'),
@@ -98,8 +122,8 @@ class RubricTests(unittest.TestCase):
     def test_missing_and_na_stay_null(self):
         state,questions=rubric.prepare(case(),{'content':'xは2'})
         raw=fake_jev(state,'fixed',questions)
-        raw['answers']['truthfulness']['choice']='NA'
-        raw['answers']['style_clarity']['choice']='UNKNOWN'
+        raw['answers']['status_truthfulness']['choice']='NA'
+        raw['answers']['status_style_clarity']['choice']='UNKNOWN'
         report=rubric.parse_result(raw,state,questions)
         self.assertIsNone(report['axes']['truthfulness']['score'])
         self.assertIsNone(report['axes']['style_clarity']['score'])
@@ -136,13 +160,53 @@ class IntegrationTests(unittest.TestCase):
     def test_history_stale_and_identical_shared_spec(self):
         rid=self.create()
         with patch('server.call_jev',side_effect=fake_jev):
-            self.handler.evaluate(rid); self.handler.evaluate(rid)
+            self.handler.evaluate(rid); self.handler.evaluate(rid, force=True)
         self.assertEqual(len(self.handler.history(rid)['items']),2)
         item=self.handler.list_results()['items'][0]
         self.assertFalse(item['stale'])
         self.handler.update_settings(item['caseId'],{'evaluationSpec':{'requirements':['새 조건'],'confirmed':True}})
         self.assertTrue(self.handler.list_results()['items'][0]['stale'])
         self.assertEqual(len(self.handler.history(rid)['items']),2)
+
+    def test_unchanged_result_is_reused_and_force_creates_new_history(self):
+        rid=self.create()
+        with patch('server.call_jev',side_effect=fake_jev) as judge:
+            first=self.handler.evaluate(rid)
+            cached=self.handler.evaluate(rid)
+            forced=self.handler.evaluate(rid,force=True)
+        self.assertEqual(judge.call_count,2)
+        self.assertTrue(cached['cached'])
+        self.assertEqual(cached['id'],first['id'])
+        self.assertNotEqual(forced['id'],first['id'])
+        self.assertIn('jevMs',forced['report']['timings'])
+        self.assertIn('evaluationFingerprint',forced['report'])
+
+    def test_concurrent_same_response_runs_only_once(self):
+        rid=self.create()
+        entered=threading.Event()
+        release=threading.Event()
+        errors=[]
+        def slow_judge(state,model,questions):
+            entered.set()
+            if not release.wait(5):
+                raise RuntimeError('test timed out')
+            return fake_jev(state,model,questions)
+        def evaluate_first():
+            try: self.handler.evaluate(rid)
+            except Exception as error: errors.append(error)
+        with patch('server.call_jev',side_effect=slow_judge) as judge:
+            thread=threading.Thread(target=evaluate_first)
+            thread.start()
+            self.assertTrue(entered.wait(5))
+            other=object.__new__(AppHandler)
+            other.db_path=self.handler.db_path
+            with self.assertRaises(EvaluationInProgress): other.evaluate(rid,force=True)
+            release.set()
+            thread.join(5)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors,[])
+        self.assertEqual(judge.call_count,1)
+        self.assertEqual(len(self.handler.history(rid)['items']),1)
 
     def test_legacy_preserved_and_not_mixed(self):
         rid=self.create()
@@ -163,8 +227,8 @@ class IntegrationTests(unittest.TestCase):
         self.handler.end_headers=lambda: None
         self.handler.export_csv()
         rows=list(csv.DictReader(io.StringIO(self.handler.wfile.getvalue().decode('utf-8-sig'))))
-        self.assertEqual(rows[0]['instruction_following'],'3')
-        self.assertEqual(rows[0]['score_type'],'ordinal_0_3')
+        self.assertEqual(rows[0]['instruction_following'],'3.0')
+        self.assertEqual(rows[0]['score_type'],'expected_level_0_3')
         self.assertEqual(json.loads(rows[0]['report_json'])['axes']['truthfulness']['score'],3)
 
     def test_function_execution_status_and_evidence_reach_report(self):
@@ -179,7 +243,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertIsNone(unavailable['axes']['truthfulness']['score'])
         with patch('server.run_python',return_value={'status':'executed','imageId':'sha256:test',
                 'passed':True,'results':[{'passed':True}],'scope':'registered tests only'}), patch('server.call_jev',side_effect=fake_jev):
-            executed=self.handler.evaluate(rid)['report']
+            executed=self.handler.evaluate(rid, force=True)['report']
         self.assertEqual(executed['codeExecution'],'executed')
         self.assertEqual(executed['sourceMetadata']['E1']['kind'],'executed_function_tests')
         self.assertEqual(executed['axes']['truthfulness']['score'],3)

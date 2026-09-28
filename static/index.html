@@ -3,22 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>JEV 모델 평가실</title>
+    <title>JEV 평가실</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <header>
       <div>
         <p class="eyebrow">LOCAL EVALUATION LAB</p>
-        <h1>JEV 모델 평가실</h1>
-        <p class="subtitle">네 질문 유형 · 다섯 평가 항목. 근거와 검증 범위를 함께 확인하세요.</p>
+        <h1>JEV 평가실</h1>
+        <p class="subtitle">모델의 답변 품질과 AI Bot의 지침 준수를 각각 평가합니다.</p>
       </div>
       <div id="api-status" class="status">연결 확인 중</div>
     </header>
 
+    <nav class="mode-nav" aria-label="평가 영역">
+      <button class="tab active" data-mode="model">모델 평가</button>
+      <button class="tab" data-mode="ai_bot">AI Bot 평가</button>
+    </nav>
     <nav aria-label="주요 화면">
       <button class="tab active" data-view="input">답변 입력</button>
       <button class="tab" data-view="results">결과 분석</button>
+      <button class="tab bot-only" data-view="bots" hidden>AI Bot 관리</button>
     </nav>
 
     <main>
@@ -27,12 +32,13 @@
           <div class="panel intro-panel">
             <div>
               <span class="step">01</span>
-              <h2>평가 질문</h2>
+              <h2 id="input-mode-heading">모델 평가 질문</h2>
             </div>
             <p>질문 한 개와 각 모델의 답변을 함께 저장합니다. 비어 있는 모델은 건너뜁니다.</p>
           </div>
 
           <div class="panel form-grid">
+            <div class="full" id="bot-select-slot" hidden></div>
             <label>케이스 제목<input name="title" required placeholder="예: Python 비동기 설명" /></label>
             <label>질문 유형
               <select name="category" required>
@@ -48,7 +54,7 @@
             <div class="full" id="new-spec"></div>
           </div>
 
-          <div class="section-heading"><span class="step">02</span><div><h2>모델 답변</h2><p>동일한 질문에 대한 결과를 모델별로 붙여넣으세요.</p></div></div>
+          <div class="section-heading"><span class="step">02</span><div><h2>모델 답변·생성 파일</h2><p>답변을 모델별로 붙여넣고, 생성된 파일이 있으면 함께 올리세요.</p></div></div>
           <div id="response-fields" class="response-grid"></div>
           <div class="actions"><button class="primary" type="submit">케이스 저장</button><button type="reset">입력 지우기</button></div>
         </form>
@@ -56,22 +62,41 @@
 
       <section id="results-view" class="view">
         <div class="results-toolbar">
-          <div><span class="step">03</span><h2>결과 분석</h2></div>
-          <div class="actions"><select id="category-filter"><option value="">모든 유형</option></select><button id="evaluate-all" class="primary">미평가 모두 실행</button><a class="button" href="/api/export.csv">CSV 내보내기</a></div>
+          <div><span class="step">03</span><h2 id="results-mode-heading">모델 평가 결과 분석</h2></div>
+          <div class="actions"><select id="bot-filter" class="bot-only" hidden><option value="">모든 Bot</option></select><select id="category-filter"><option value="">모든 유형</option></select><button id="evaluate-all" class="primary">미평가 모두 실행</button><a id="export-link" class="button" href="/api/export.csv?mode=model">CSV 내보내기</a></div>
         </div>
         <div id="summary" class="summary-grid"></div>
         <div class="panel table-wrap">
           <table>
-            <thead><tr><th>케이스·근거</th><th>모델</th><th>상태</th><th>IF</th><th>사실성</th><th>길이</th><th>명료성</th><th>안전성</th><th>작업</th></tr></thead>
+            <thead><tr><th>케이스·근거</th><th>상태</th><th>작업</th></tr></thead>
             <tbody id="result-rows"></tbody>
           </table>
           <div id="empty-state" class="empty">아직 저장된 답변이 없습니다.</div>
         </div>
       </section>
+      <section id="bots-view" class="view">
+        <div class="results-toolbar"><div><span class="step">B</span><h2>AI Bot 관리</h2></div></div>
+        <form id="bot-form" class="panel form-grid">
+          <input type="hidden" name="botId" />
+          <label>Bot 이름<input name="name" required maxlength="120" /></label>
+          <label class="full">설명<textarea name="description" required rows="3" maxlength="2000"></textarea></label>
+          <label class="full">지침 <span>섹션당 최대 20,000자 · 전체 최대 30,000자. Markdown 제목으로 나누면 제목별로 평가합니다.</span><textarea name="instructions" required rows="10" maxlength="30000" placeholder="Bot이 반드시 따라야 할 규칙을 단락이나 목록으로 입력하세요."></textarea></label>
+          <div class="actions full"><button type="button" id="cancel-bot-edit">새 Bot 입력</button><button class="primary" type="submit">Bot 저장</button></div>
+        </form>
+        <div id="bot-list" class="bot-list"></div>
+      </section>
     </main>
 
+    <template id="bot-select-template">
+      <label class="full" id="bot-select-wrap">평가할 AI Bot<select id="bot-select" required></select><small id="bot-instruction-preview"></small></label>
+      <label>시나리오 유형<select name="testType"><option value="normal">정상 테스트</option><option value="exception">예외 테스트</option></select></label>
+      <label class="full">입력 예시 <span>선택 · 시나리오 설계용</span><textarea name="inputExample" rows="2" maxlength="4000" placeholder="예: 강의 녹취록을 분석해 주세요."></textarea></label>
+      <label class="full">점검 관점<textarea name="checkFocus" rows="2" maxlength="4000" required placeholder="예: 지침에 정의된 톤과 형식을 따르는가?"></textarea></label>
+      <label class="full">기대 결과<textarea name="expectedBehavior" rows="2" maxlength="4000" required placeholder="예: 지침에 정의된 톤/형식으로 정확히 응답"></textarea></label>
+    </template>
+
     <div id="toast" role="status" aria-live="polite"></div>
-    <dialog id="settings-dialog"><form id="settings-form"><h2>공통 평가 설정</h2><p>이 케이스의 모든 모델에 적용됩니다. 기존 평가는 보존되며 설정 변경 후 재평가가 필요합니다.</p><label>질문 유형<select name="category"></select></label><div id="edit-spec"></div><div class="actions"><button type="button" id="close-settings">닫기</button><button class="primary">저장</button></div></form></dialog>
+    <dialog id="settings-dialog"><form id="settings-form"><h2>공통 평가 설정</h2><p>이 케이스의 모든 모델에 적용됩니다. 기존 평가는 보존되며 설정 변경 후 재평가가 필요합니다.</p><label>질문 유형<select name="category"></select></label><div id="edit-bot-scenario" hidden><label>시나리오 유형<select name="testType"><option value="normal">정상 테스트</option><option value="exception">예외 테스트</option></select></label><label>입력 예시<textarea name="inputExample" rows="2" maxlength="4000"></textarea></label><label>점검 관점<textarea name="checkFocus" rows="2" maxlength="4000"></textarea></label><label>기대 결과<textarea name="expectedBehavior" rows="2" maxlength="4000"></textarea></label></div><div id="edit-spec"></div><div class="actions"><button type="button" id="close-settings">닫기</button><button class="primary">저장</button></div></form></dialog>
     <dialog id="history-dialog"><h2>평가 이력</h2><div id="history-content"></div><button id="close-history">닫기</button></dialog>
     <script src="/evaluator.js" defer></script>
   </body>
