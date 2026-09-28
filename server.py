@@ -14,6 +14,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
 from html.parser import HTMLParser
@@ -24,6 +25,7 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 
 import evaluation as rubric
 import bot_evaluation
+import link_verification
 from rendering import inspect_html
 from code_runner import run_python
 from generated_files import MAX_FILE_BYTES, inspect_generated_file
@@ -241,6 +243,11 @@ def init_db(db_path: Path) -> None:
                 token TEXT NOT NULL,
                 started_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS link_cache (
+                url TEXT PRIMARY KEY,
+                checked_at TEXT NOT NULL,
+                result_json TEXT NOT NULL
+            );
             """
         )
         case_columns = {row[1] for row in db.execute("PRAGMA table_info(cases)")}
@@ -273,6 +280,65 @@ def init_db(db_path: Path) -> None:
         artifact_columns = {row[1] for row in db.execute("PRAGMA table_info(response_artifacts)")}
         if "text_available" not in artifact_columns:
             db.execute("ALTER TABLE response_artifacts ADD COLUMN text_available INTEGER NOT NULL DEFAULT 1")
+
+
+def check_answer_links(db_path: Path, content: str) -> dict:
+    citations, skipped = link_verification.extract_citations(content)
+    if not citations:
+        return {"items": [], "skippedCount": 0}
+    urls = [item["url"] for item in citations]
+    placeholders = ",".join("?" for _ in urls)
+    with connect(db_path) as db:
+        rows = db.execute(f"SELECT url, checked_at, result_json FROM link_cache WHERE url IN ({placeholders})", urls).fetchall()
+    now = datetime.now(UTC)
+    cached = {}
+    for row in rows:
+        try:
+            age = now - datetime.fromisoformat(row["checked_at"])
+            if timedelta(0) <= age < timedelta(hours=1):
+                candidate = json.loads(row["result_json"])
+                if candidate.get("checkerVersion") == link_verification.CACHE_VERSION:
+                    cached[row["url"]] = candidate
+        except (ValueError, TypeError):
+            pass
+    missing = [url for url in urls if url not in cached]
+    if missing:
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            fresh = dict(zip(missing, pool.map(link_verification.verify_url, missing)))
+        with connect(db_path) as db:
+            db.executemany("INSERT OR REPLACE INTO link_cache(url, checked_at, result_json) VALUES (?, ?, ?)",
+                           [(url, item["checkedAt"], json.dumps(item, ensure_ascii=False))
+                            for url, item in fresh.items()])
+        cached.update(fresh)
+    return {"items": [{**cached[item["url"]], "claimContext": item["claimContext"]} for item in citations],
+            "skippedCount": skipped}
+
+
+def add_web_sources(state: dict, questions: dict, links: dict) -> None:
+    state["web_citations_skipped"] = links["skippedCount"]
+    if links["items"]:
+        state["verification_scope"] = (
+            "업로드·등록 자료와 답변이 인용한 공개 HTTPS 페이지의 확인 시점 본문 일부를 비교한다. "
+            "페이지 접속 성공만으로 답변 주장을 확정하지 않는다. 실제 검색 도구 실행은 관측하지 못했다."
+        )
+    for item in links["items"]:
+        if item["status"] != "verified":
+            continue
+        if len(state["sources"]) >= 200:
+            break
+        source_id = f"E{len(state['sources']) + 1}"
+        state["sources"][source_id] = item["excerpt"]
+        state["source_metadata"][source_id] = {"title": item["title"] or item["url"],
+                                                 "kind": "verified_cited_web_page",
+                                                 "reference": {"url": item["finalUrl"],
+                                                               "checkedAt": item["checkedAt"]}}
+        item["sourceRef"] = source_id
+        question = questions.setdefault("source_ref_truthfulness", {
+            "type": "choice", "instructions": "사실 주장과 직접 대조할 state.sources 위치를 고르라.",
+            "criteria": {"NONE": "직접 근거 없음"}})
+        question["criteria"][source_id] = f"state.sources.{source_id}"
+    state["web_citations"] = [{key: value for key, value in item.items() if key != "excerpt"}
+                              for item in links["items"]]
 
 
 def call_jev(
@@ -697,6 +763,7 @@ class AppHandler(SimpleHTTPRequestHandler):
     def _run_evaluation(self, response_id: int, token: str) -> dict[str, Any]:
         started = time.monotonic()
         html_ms = 0
+        link_ms = 0
         # Release DB connection before browser/network work.
         with connect(self.db_path) as db:
             response_row = db.execute("SELECT * FROM responses WHERE id = ?", (response_id,)).fetchone()
@@ -749,7 +816,12 @@ class AppHandler(SimpleHTTPRequestHandler):
             state, questions = rubric.prepare(evaluation_case, effective_response, code_execution=execution)
         if artifact_summary:
             state["generated_artifact"] = artifact_summary
+        links = {"items": [], "skippedCount": 0}
         if bot_row:
+            link_started = time.monotonic()
+            links = check_answer_links(self.db_path, effective_content)
+            add_web_sources(state, questions, links)
+            link_ms = round((time.monotonic() - link_started) * 1000)
             bot_evaluation.add_questions(state, questions, bot_row["instructions"],
                                          case["test_type"], case["expected_behavior"], case["check_focus"],
                                          case["title"], case["input_example"], artifact_summary)
@@ -780,6 +852,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             report["expectedBehavior"] = case["expected_behavior"]
             report["checkFocus"] = case["check_focus"]
             report["inputExample"] = case["input_example"]
+            report["linkVerification"] = links
             bot_evaluation.apply_discrete_quality(result, state, report)
             report["rubricVersion"] = bot_evaluation.QUALITY_VERSION
         report["settingsHash"] = settings_digest(case, spec)
@@ -792,7 +865,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             report["needsReview"] = True
         report["evaluatorModel"] = str(result.get("model", self.evaluator_model))
         report["requestedEvaluatorModel"] = self.evaluator_model
-        report["timings"] = {"htmlInspectionMs": html_ms, "jevMs": jev_ms,
+        report["timings"] = {"htmlInspectionMs": html_ms, "linkCheckMs": link_ms, "jevMs": jev_ms,
                              "totalMs": round((time.monotonic() - started) * 1000)}
         scores = {key: value["score"] for key, value in report["axes"].items()}
         raw = {"rubric_version": report["rubricVersion"], "report": report, "quality": result,
@@ -940,7 +1013,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                   "artifact_filename", "artifact_format", "artifact_size", "artifact_sha256", "artifact_text_truncated",
                   "score_type", "evaluator_model", "evaluated_at", "stale", "needs_review", "input_hash"]
         fields += [field for key in rubric.LABELS for field in (key, key + "_status", key + "_confidence")]
-        fields += ["quality_violations_json", "quality_pending_json", "report_json", "legacy_scores_json"]
+        fields += ["quality_violations_json", "quality_pending_json", "link_verification_json",
+                   "report_json", "legacy_scores_json"]
         writer = csv.DictWriter(output, fieldnames=fields)
         writer.writeheader()
         for item in self.list_results(mode, bot_id)["items"]:
@@ -966,6 +1040,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                    "stale": item["stale"], "needs_review": report.get("needsReview"), "input_hash": report.get("inputHash"),
                    "quality_violations_json": json.dumps({key: axis.get("violations", []) for key, axis in report.get("axes", {}).items()}, ensure_ascii=False),
                    "quality_pending_json": json.dumps({key: axis.get("pendingReasons", []) for key, axis in report.get("axes", {}).items()}, ensure_ascii=False),
+                   "link_verification_json": json.dumps(report.get("linkVerification", {}), ensure_ascii=False),
                    "report_json": json.dumps(report, ensure_ascii=False),
                    "legacy_scores_json": json.dumps(item["scores"], ensure_ascii=False) if not report else ""}
             for key, axis in report.get("axes", {}).items():

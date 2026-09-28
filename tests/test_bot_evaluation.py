@@ -302,6 +302,83 @@ class BotEvaluationTests(unittest.TestCase):
         self.assertEqual(report["axes"]["response_length"]["score"], 3.0)
         self.assertTrue(report["axes"]["response_length"]["rejectedFindings"])
 
+    def test_web_link_sources_and_independent_axis_grades(self):
+        case = {"category": "일반지식·설명", "prompt": "최신 팁을 알려줘", "conversation_history": "",
+                "attachment_text": "", "evaluation_spec_json": "{}"}
+        state, questions = rubric.prepare(case, {"content": "다음 팁을 참고하세요. https://example.org/report"})
+        links = {"items": [{"url": "https://example.org/report", "finalUrl": "https://example.org/report",
+                            "status": "verified", "httpStatus": 200, "contentType": "text/html",
+                            "title": "퍼실리테이션 보고서", "excerpt": "회의에서 모두의 발언 기회를 확보합니다.",
+                            "checkedAt": "2026-09-28T00:00:00+00:00", "sha256": "a" * 64,
+                            "reason": None, "claimContext": "다음 팁을 참고하세요."}], "skippedCount": 0}
+        from server import add_web_sources
+        add_web_sources(state, questions, links)
+        self.assertEqual(state["sources"]["E1"], "회의에서 모두의 발언 기회를 확보합니다.")
+        self.assertIn("E1", questions["source_ref_truthfulness"]["criteria"])
+        bot_evaluation.add_questions(state, questions, "녹취를 분석한 HTML 리포트만 작성한다.")
+        self.assertIn("verified_cited_web_page", questions["status_truthfulness"]["instructions"])
+
+        raw = bot_jev(state, "jev-test-fixed", questions, verdict="VIOLATED")
+        raw["answers"]["bot_issue_instruction_following_1"]["choice"] = "MAJOR_ROLE_BOUNDARY"
+        raw["answers"]["bot_issue_instruction_following_2"]["choice"] = "MINOR_ROLE_BOUNDARY"
+        raw["answers"]["answer_ref_instruction_following"]["choice"] = "NONE"
+        raw["answers"]["source_ref_instruction_following"]["choice"] = "B1"
+        raw["answers"]["bot_length_issue"]["choice"] = "UNKNOWN"
+        raw["answers"]["status_truthfulness"]["choice"] = "UNKNOWN"
+        raw["answers"]["bot_issue_truthfulness_1"]["choice"] = "UNKNOWN"
+        raw["answers"]["bot_issue_truthfulness_2"]["choice"] = "UNKNOWN"
+        report = rubric.parse_result(raw, state, questions)
+        report["botAssessment"] = bot_evaluation.parse_result(raw, state)
+        report["groundingIssue"] = "UNKNOWN"
+        report["responseLengthIssue"] = "UNKNOWN"
+        bot_evaluation.apply_discrete_quality(raw, state, report)
+        self.assertEqual(report["axes"]["instruction_following"]["score"], 1)
+        self.assertEqual(report["axes"]["instruction_following"]["violations"][0]["answerRef"], "FULL_ANSWER")
+        self.assertEqual(report["axes"]["response_length"]["score"], 3)
+        self.assertIsNone(report["axes"]["truthfulness"]["score"])
+
+    def test_cited_link_check_is_saved_in_bot_report(self):
+        _, case = self.create_bot_case()
+        response_id = case["responses"][0]["id"]
+        observed = {}
+        links = {"items": [{"url": "https://example.org/report", "finalUrl": "https://example.org/report",
+                            "status": "verified", "httpStatus": 200, "contentType": "text/html",
+                            "title": "보고서", "excerpt": "회의 참석자에게 고르게 발언 기회를 제공합니다.",
+                            "checkedAt": "2026-09-28T00:00:00+00:00", "sha256": "a" * 64,
+                            "reason": None, "claimContext": "발언 기회"}], "skippedCount": 0}
+        def judge(state, model, questions):
+            observed["sources"] = dict(state["sources"])
+            observed["metadata"] = dict(state["source_metadata"])
+            return bot_jev(state, model, questions)
+        with (patch("server.check_answer_links", return_value=links),
+              patch("server.call_jev", side_effect=judge)):
+            report = self.handler.evaluate(response_id)["report"]
+        self.assertEqual(report["linkVerification"]["items"][0]["sourceRef"], "E1")
+        self.assertEqual(observed["sources"]["E1"], links["items"][0]["excerpt"])
+        self.assertEqual(observed["metadata"]["E1"]["kind"], "verified_cited_web_page")
+        self.assertIn("linkCheckMs", report["timings"])
+
+    def test_partial_web_page_keeps_truth_score_reviewable(self):
+        case = {"category": "일반지식·설명", "prompt": "팁을 알려줘", "conversation_history": "",
+                "attachment_text": "", "evaluation_spec_json": "{}"}
+        state, questions = rubric.prepare(case, {"content": "회의 목표를 정합니다. https://example.org/report"})
+        from server import add_web_sources
+        add_web_sources(state, questions, {"items": [{"url": "https://example.org/report",
+            "finalUrl": "https://example.org/report", "status": "verified", "title": "보고서",
+            "excerpt": "회의 목표를 정합니다.", "checkedAt": "2026-09-28T00:00:00+00:00",
+            "truncated": True}], "skippedCount": 0})
+        bot_evaluation.add_questions(state, questions, "회의를 안내한다.")
+        raw = bot_jev(state, "jev-test-fixed", questions)
+        raw["answers"]["status_truthfulness"]["choice"] = "RATED"
+        report = rubric.parse_result(raw, state, questions)
+        report["botAssessment"] = bot_evaluation.parse_result(raw, state)
+        report["groundingIssue"] = "NONE"
+        report["responseLengthIssue"] = "NONE"
+        bot_evaluation.apply_discrete_quality(raw, state, report)
+        self.assertEqual(report["axes"]["truthfulness"]["score"], 3)
+        self.assertTrue(report["axes"]["truthfulness"]["needsReview"])
+        self.assertIn("일부 인용 링크", " ".join(report["axes"]["truthfulness"]["notes"]))
+
     def test_grounding_treats_document_label_as_metadata_and_requires_answer_evidence(self):
         case = {"category": "강의·첨부자료", "prompt": "리뷰해줘", "conversation_history": "",
                 "attachment_text": "AI로 생성된 콘텐츠입니다\n\n발화자 1 (00:01)\n회의를 시작합니다.",
@@ -309,7 +386,7 @@ class BotEvaluationTests(unittest.TestCase):
         state, questions = rubric.prepare(case, {"content": "발화자 1은 회의를 시작했습니다."})
         bot_evaluation.add_questions(state, questions, "회의록에 근거해 답한다.")
         self.assertIn("E1", questions["source_ref_truthfulness"]["criteria"])
-        self.assertIn("자료 관련 사실 주장", questions["bot_issue_truthfulness_1"]["instructions"])
+        self.assertIn("업로드 자료 관련 주장", questions["bot_issue_truthfulness_1"]["instructions"])
         raw = bot_jev(state, "jev-test-fixed", questions)
         raw["answers"]["source_ref_truthfulness"]["choice"] = "E2"
         raw["answers"]["answer_ref_truthfulness"]["choice"] = "NONE"
