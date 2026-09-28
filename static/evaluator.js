@@ -54,11 +54,47 @@ function fillSpec(prefix,spec) {
   $(`#${prefix}-checks`).value=JSON.stringify(spec.checks || [],null,2);
   $(`#${prefix}-code-tests`).value=JSON.stringify(spec.codeTests || {},null,2);
 }
-function axisCell(axis, scoreType) { return !axis ? '—' : axis.score === null ? esc(statusNames[axis.status]) : `${scoreType === 'expected_level_0_3' ? Number(axis.score).toFixed(2) : axis.score} / 3`; }
+function axisCell(axis, scoreType) { return !axis ? '—' : axis.score === null ? esc(statusNames[axis.status]) : `${scoreType === 'expected_level_0_3' ? Number(axis.score).toFixed(2) : axis.score} / 3${scoreType === 'violation_count_0_3' && axis.needsReview ? ' · 검토 필요' : ''}`; }
+function issueEvidence(v) {
+  if (v.requirementRef) return `<article class="issue-card linked-issue">
+    <b>${esc(v.severity === 'major' ? '중대' : '경미')} · ${esc(v.label)}</b>
+    <p class="hint">JEV 선택 확신도 ${typeof v.confidence === 'number' ? v.confidence.toFixed(2) : '미제공'} · 점수 결정 기준은 아래 지침·관측 근거의 연결입니다.</p>
+    <div class="issue-pointers"><span>지침 ${esc(v.requirementRef)}</span><span>관측 ${esc(v.observationRef)}</span><span>대상 ${esc(({MESSAGE:'채팅 답변',ARTIFACT:'생성 파일',BOTH:'전체'})[v.target] || '미확인')}</span></div>
+    <div class="linked-evidence"><div><strong>적용 지침 · ${esc(v.requirementSection || '원문 항목')}</strong><p>${esc(v.requirementText)}</p></div>
+    <div><strong>실제 관측</strong><p>${['FULL_MESSAGE','FULL_ARTIFACT'].includes(v.observationRef) && v.kind === 'OMISSION' ? 'JEV가 해당 출력 전체에서 필수 내용의 누락을 선택했습니다. 아래에서 본문을 직접 확인할 수 있습니다.' : esc(v.observedText || '관측 내용 없음')}</p></div></div>
+    ${['FULL_MESSAGE','FULL_ARTIFACT'].includes(v.observationRef) ? `<details><summary>검사한 출력 본문 보기</summary><pre>${esc(v.observedText)}</pre></details>` : ''}
+  </article>`;
+  const raw = v.answerText || '';
+  const htmlCode = /<\/?(?:style|head|body|html|table|div|section|main)\b|\{[^}]{0,120}:[^}]*\}/i.test(raw);
+  const multiRule = (v.sourceText || '').split('\n').filter(line => /^\s*(?:[-*] |\d+[.)] |#{1,6} )/.test(line)).length > 1;
+  const uncertain = typeof v.confidence !== 'number' || v.confidence < .7;
+  return `<article class="issue-card${uncertain ? ' uncertain' : ''}">
+    <b>${esc(v.severity === 'major' ? '중대' : '경미')} · ${esc(v.label)}</b>
+    <p class="issue-warning">${uncertain ? `위반 선택의 확신도가 낮습니다 (${typeof v.confidence === 'number' ? v.confidence.toFixed(2) : '미제공'}). ` : ''}${multiRule ? '선택된 기준에 여러 세부 항목이 있지만, 어떤 항목을 어겼는지는 기록되지 않았습니다.' : '평가 기록에 구체적인 위반 행동 설명이 없습니다. 아래 위치와 기준을 직접 확인해야 합니다.'}</p>
+    <div class="issue-pointers"><span>답변 위치 ${esc(v.answerRef || '없음')}</span><span>기준 위치 ${esc(v.sourceRef || '없음')}</span></div>
+    ${htmlCode ? '<p class="hint">선택된 답변 구간은 HTML/CSS 원본입니다. 화면에 보이는 위반 문장과 직접 연결되지 않았습니다.</p>' : raw ? `<p class="issue-excerpt">${esc(raw.slice(0, 350))}${raw.length > 350 ? '…' : ''}</p>` : '<p class="hint">답변의 특정 문장이 기록되지 않았습니다.</p>'}
+    <details><summary>선택된 원문과 기준 전체 보기</summary><h4>답변 ${esc(v.answerRef || '없음')}</h4><pre>${esc(raw || '본문 위치 없음')}</pre><h4>기준 ${esc(v.sourceRef || '없음')}</h4><pre>${esc(v.sourceText || '기준 위치 없음')}</pre></details>
+  </article>`;
+}
+function qualityAxis(key, a, report) {
+  const uncertain = (a.violations || []).some(v => !v.requirementRef && (typeof v.confidence !== 'number' || v.confidence < .7));
+  const inconsistent = a.score !== null && (uncertain || (report.botAssessment?.rules || []).some(r => r.id === a.sourceRef && r.verdict === 'UNKNOWN'));
+  const open = key === 'instruction_following' && (a.score !== 3 || a.needsReview);
+  const reasons = a.pendingReasonChoices || [];
+  const reasonList = reasons.length ? `<div class="pending-reasons"><b>판정 불가 이유 · 자동 검사 선택 ${reasons.length}개</b><ul>${reasons.map(r=>`<li><strong>${esc(r.label)}</strong><span>${esc(r.detail)}</span><small>${esc(r.code)}</small></li>`).join('')}</ul></div>` : a.pendingReasons?.map(n=>`<p class="issue-warning">판정 불가 이유: ${esc(n)}</p>`).join('') || '';
+  const judgeReason = key === 'instruction_following' && a.score === null && a.judgeUnverifiableReason ? `<p class="judge-reason">JEV 자료 관측 선택: ${esc(a.judgeUnverifiableReason.label)} (${esc(a.judgeUnverifiableReason.code)}) · 확신도 ${typeof a.judgeUnverifiableReason.confidence === 'number' ? a.judgeUnverifiableReason.confidence.toFixed(2) : '미제공'}</p>` : '';
+  return `<details class="quality-axis" ${open ? 'open' : ''}><summary><b>${esc(config.criteria[key])}: ${axisCell(a, report.scoreType)}</b><span>${esc(a.description)}${inconsistent ? ' · 기존 점수의 근거 검토 필요' : ''}</span></summary>
+    ${inconsistent ? '<p class="issue-warning">이 저장된 점수는 불확실한 위반 선택을 감점에 사용했습니다. 강제 재평가 후 새 기준으로 확인해 주세요.</p>' : ''}
+    ${a.score === null ? `${reasonList}${judgeReason}<p class="hint">자동 검사 선택은 JEV가 고른 위반의 순서·확신도·근거를 검사한 결과입니다. JEV 자료 관측 선택과 서로 다를 수 있습니다.</p>` : ''}
+    ${(a.violations || []).map(issueEvidence).join('') || '<p class="hint">기록된 위반이 없습니다.</p>'}
+    ${a.rejectedFindings?.map(n=>`<p class="hint">제외: ${esc(n)}</p>`).join('') || ''}
+    ${a.notes?.filter(n=>!(a.pendingReasons || []).includes(n) && !(a.rejectedFindings || []).includes(n)).map(n=>`<p class="hint">${esc(n)}</p>`).join('') || ''}
+  </details>`;
+}
 function reportDetails(report, botMode=false) {
   if (!report) return '';
-  const axes = Object.entries(report.axes).map(([key,a])=>`<article class="claim-card"><b>${esc(config.criteria[key])}: ${axisCell(a, report.scoreType)}</b><p>${esc(a.description)}</p>
-    ${report.scoreType === 'violation_count_0_3' ? `<p>확인된 위반: 경미 ${a.minorCount || 0}건 · 중대 ${a.majorCount || 0}건</p>${(a.violations || []).map(v=>`<details><summary>${v.severity === 'major' ? '중대' : '경미'} · ${esc(v.label)} · 답변 ${esc(v.answerRef)} / 기준 ${esc(v.sourceRef)}</summary><p>답변: ${esc(v.answerText || '필수 내용 누락')}</p><p>기준·자료: ${esc(v.sourceText || '해당 없음')}</p></details>`).join('')}` : `<p>JEV 확신도: ${typeof a.confidence === 'number' ? a.confidence.toFixed(2) : '미제공'} (정확도 보장 아님)</p>`}
+  const axes = report.scoreType === 'violation_count_0_3' ? Object.entries(report.axes).map(([key,a])=>qualityAxis(key,a,report)).join('') : Object.entries(report.axes).map(([key,a])=>`<article class="claim-card"><b>${esc(config.criteria[key])}: ${axisCell(a, report.scoreType)}</b><p>${esc(a.description)}</p>
+    <p>JEV 확신도: ${typeof a.confidence === 'number' ? a.confidence.toFixed(2) : '미제공'} (정확도 보장 아님)</p>
     ${report.scoreType === 'expected_level_0_3' && a.status === 'rated' && a.probabilities ? `<p>단계별 확률: ${[0,1,2,3].map(n=>`${n}점 ${((a.probabilities[String(n)] || 0)*100).toFixed(1)}%`).join(' · ')}</p><p class="hint">점수는 단계별 확률의 가중 평균입니다. 표시된 설명은 가장 가능성 높은 단계 기준입니다.</p>` : ''}
     ${report.scoreType !== 'violation_count_0_3' && a.answerText ? `<p>답변 ${esc(a.answerRef)}: ${esc(a.answerText)}</p>` : ''}
     ${report.scoreType !== 'violation_count_0_3' && a.sourceText ? `<p>근거 ${esc(a.sourceRef)}: ${esc(a.sourceText)}</p>` : ''}
@@ -74,9 +110,10 @@ function reportDetails(report, botMode=false) {
   const groundingNames = {NONE:'확인된 자료 불일치 없음',MISQUOTE:'원문과 다른 인용',INVENTED_EVENT:'자료에 없는 사실',WRONG_ATTRIBUTION:'귀속·시간 오류',OUTSIDE_SOURCE:'자료 밖 사실 사용',UNKNOWN:'대조 보류'};
   const lengthNames = {NONE:'확인된 분량 문제 없음',REPETITION:'본문 반복',IRRELEVANT:'무관한 설명',OVERCOMPRESSED:'과도한 압축',UNKNOWN:'본문 확인 불가'};
   const botEvidence = botMode ? `${report.groundingIssue ? `<p>자료 대조: ${esc(groundingNames[report.groundingIssue] || report.groundingIssue)} · 원문 일치 인용 ${report.quoteObservations?.exactMatches?.length || 0}건 · 확인 필요 인용 ${report.quoteObservations?.unmatchedQuotes?.length || 0}건</p>` : ''}${report.responseLengthIssue ? `<p>본문 분량: ${esc(lengthNames[report.responseLengthIssue] || report.responseLengthIssue)}</p>` : ''}` : '';
-  return `<details><summary>판정·근거·검사 보기</summary><p>평가 신뢰성: 미검증 · 종합 순위 미산출 · ${report.scoreType === 'expected_level_0_3' ? 'Score 확률 가중 평균' : report.scoreType === 'violation_count_0_3' ? '확인된 위반 개수·심각도에 따른 정수 점수' : '기존 단계 선택'}</p>${report.issues.map(s=>`<p>${esc(s)}</p>`).join('')}
+  const overview = report.scoreType === 'violation_count_0_3' ? `<div class="quality-overview">${axes}</div>` : '';
+  return `${overview}<details><summary>${overview ? '검사·원본 기록 보기' : '판정·근거·검사 보기'}</summary><p>평가 신뢰성: 미검증 · 종합 순위 미산출 · ${report.scoreType === 'expected_level_0_3' ? 'Score 확률 가중 평균' : report.scoreType === 'violation_count_0_3' ? '확인된 위반 개수·심각도에 따른 정수 점수' : '기존 단계 선택'}</p>${report.issues.map(s=>`<p>${esc(s)}</p>`).join('')}
     ${botEvidence}${links ? `<details><summary>답변 인용 링크 확인 · ${linkItems.filter(item=>item.status === 'verified').length}/${linkItems.length}개 본문 확인</summary><p class="hint">링크 접속과 본문 존재는 주장 정확성 또는 실제 검색 도구 사용의 증거가 아닙니다.</p><ul>${links}</ul>${report.linkVerification.skippedCount ? `<p>검사 상한으로 ${esc(report.linkVerification.skippedCount)}개 링크를 확인하지 않았습니다.</p>` : ''}</details>` : ''}${!botMode && requirements ? `<ul>${requirements}</ul>` : ''}${checks ? `<ul>${checks}</ul>` : ''}${sources ? `<details><summary>등록 근거 목록</summary><ul>${sources}</ul></details>` : ''}${render ? `<p>HTML 렌더링: ${render.rendered?'관측 완료':'미완료'} ${esc(render.reason || render.limitation || '')} ${screenshot}</p>` : ''}
-    ${report.executionDetails ? `<p>코드 실행: ${esc(report.executionDetails.status)} ${esc(report.executionDetails.reason || report.executionDetails.scope || '')}</p>` : ''}<div class="claim-list">${axes}</div><p>입력 해시: ${esc(report.inputHash)}</p></details>`;
+    ${report.executionDetails ? `<p>코드 실행: ${esc(report.executionDetails.status)} ${esc(report.executionDetails.reason || report.executionDetails.scope || '')}</p>` : ''}${overview ? '' : `<div class="claim-list">${axes}</div>`}<p>입력 해시: ${esc(report.inputHash)}</p></details>`;
 }
 function botDetails(assessment) {
   if (!assessment) return '';

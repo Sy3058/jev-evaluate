@@ -87,6 +87,40 @@ class BrowserTests(unittest.TestCase):
                         expect(page.locator('.bot-assessment')).not_to_have_attribute('open', '')
                         page.locator('.bot-assessment summary').click()
                         expect(page.locator('.bot-assessment')).to_contain_text('먼저 인사한다.')
+                        old_axis = {'score': 2, 'description': '경미한 위반 1건이 확인됐습니다.',
+                                    'needsReview': True, 'sourceRef': 'B4', 'pendingReasons': [],
+                                    'rejectedFindings': [], 'notes': [], 'violations': [{
+                                        'severity': 'minor', 'label': '지침의 필수 구성 요소가 빠짐',
+                                        'answerRef': 'A3', 'answerText': 'body{font-size:13px}<body>리포트</body>',
+                                        'sourceRef': 'B4', 'sourceText': '# 3. 발화 인용\n- 원문 인용\n- 타임스탬프',
+                                        'confidence': .19}]}
+                        rendered_issue = page.evaluate("axis => qualityAxis('instruction_following', axis, {scoreType:'violation_count_0_3', botAssessment:{rules:[{id:'B4',verdict:'UNKNOWN'}]}})", old_axis)
+                        self.assertIn('기존 점수의 근거 검토 필요', rendered_issue)
+                        self.assertIn('어떤 항목을 어겼는지는 기록되지 않았습니다', rendered_issue)
+                        self.assertIn('HTML/CSS 원본', rendered_issue)
+                        self.assertIn('<details class="quality-axis" open>', rendered_issue)
+                        pending_axis = {'score': None, 'status': 'unverifiable',
+                                        'description': '근거 확인이 필요해 점수를 보류했습니다.',
+                                        'needsReview': True, 'violations': [], 'notes': [],
+                                        'pendingReasonChoices': [{
+                                            'code': 'ISSUE_ORDER_CONFLICT', 'label': '위반 선택 순서 충돌',
+                                            'detail': '첫 번째 위반 없음, 두 번째 위반 경미 누락', 'origin': 'validator'}],
+                                        'judgeUnverifiableReason': {'code': 'NONE',
+                                            'label': '평가 가능한 답변과 기준이 있음', 'confidence': .91}}
+                        rendered_pending = page.evaluate("axis => qualityAxis('instruction_following', axis, {scoreType:'violation_count_0_3'})", pending_axis)
+                        self.assertIn('판정 불가 이유 · 자동 검사 선택 1개', rendered_pending)
+                        self.assertIn('위반 선택 순서 충돌', rendered_pending)
+                        self.assertIn('JEV 자료 관측 선택', rendered_pending)
+                        linked_issue = page.evaluate("issue => issueEvidence(issue)", {
+                            'severity': 'minor', 'label': '필수 구성 요소 누락',
+                            'requirementRef': 'R2', 'requirementSection': '출력 형식',
+                            'requirementText': '- 표로 작성한다.',
+                            'observationRef': 'O3', 'observedText': '문단으로 작성했습니다.',
+                            'confidence': .18})
+                        self.assertIn('적용 지침', linked_issue)
+                        self.assertIn('표로 작성한다', linked_issue)
+                        self.assertIn('문단으로 작성했습니다', linked_issue)
+                        self.assertNotIn('위반 선택의 확신도가 낮습니다', linked_issue)
                         page.locator('[data-upload-for]').set_input_files({
                             'name':'수정.html','mimeType':'text/html',
                             'buffer':b'<!DOCTYPE html><html lang="ko"><body>updated</body></html>'})

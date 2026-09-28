@@ -367,6 +367,55 @@ def call_jev(
         raise RuntimeError(f"JEV API 연결 실패: {error.reason}") from error
 
 
+def call_bot_jev(state: dict[str, Any], model: str, questions: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Keep large Bot evaluations below the per-request token budget."""
+    def payload_size(payload_state: dict, payload_questions: dict) -> int:
+        return len(json.dumps({"model": model, "state": payload_state, "questions": payload_questions},
+                              ensure_ascii=False).encode("utf-8"))
+
+    if payload_size(state, questions) <= 110_000:
+        return call_jev(state, model, questions)
+    groups: dict[str, dict] = {"if": {}, "bot_rules": {}, "quality": {}}
+    for key, question in questions.items():
+        if (key.startswith("bot_if_") or
+                key in {"status_instruction_following", "source_ref_instruction_following",
+                        "bot_issue_source_instruction_following_2"}):
+            group = "if"
+        elif key in {"bot_expected", "bot_expected_ref"} or re.fullmatch(r"bot_(?:ref_)?B\d+", key):
+            group = "bot_rules"
+        else:
+            group = "quality"
+        groups[group][key] = question
+    answers: dict[str, Any] = {}
+    usage: dict[str, int] = {}
+    returned_model = model
+    for group_name, group_questions in groups.items():
+        if not group_questions:
+            continue
+        if group_name == "if":
+            group_state = {key: value for key, value in state.items()
+                           if key not in {"answer", "source_metadata", "response_message", "artifact_body_text",
+                                          "visible_report_text"}}
+            inspection = state.get("inspection") or {}
+            group_state["inspection"] = {key: inspection[key] for key in ("rendered", "reason") if key in inspection}
+        else:
+            group_state = {key: value for key, value in state.items()
+                           if key not in {"bot_requirements", "if_observations"}}
+        size = payload_size(group_state, group_questions)
+        if size > 110_000:
+            raise ValueError(f"JEV {group_name} 평가 입력이 너무 큽니다 ({size:,}바이트). 케이스 자료를 나누어 주세요.")
+        result = call_jev(group_state, model, group_questions)
+        missing = group_questions.keys() - result.get("answers", {}).keys()
+        if missing:
+            raise RuntimeError(f"JEV {group_name} 응답에 평가 항목 {len(missing)}개가 누락됐습니다.")
+        answers.update(result["answers"])
+        returned_model = result.get("model", returned_model)
+        for key, value in (result.get("usage") or {}).items():
+            if isinstance(value, (int, float)):
+                usage[key] = usage.get(key, 0) + value
+    return {"model": returned_model, "answers": answers, "usage": usage}
+
+
 class AppHandler(SimpleHTTPRequestHandler):
     db_path = DEFAULT_DB
     evaluator_model = "jev-1.13.0"
@@ -816,6 +865,9 @@ class AppHandler(SimpleHTTPRequestHandler):
             state, questions = rubric.prepare(evaluation_case, effective_response, code_execution=execution)
         if artifact_summary:
             state["generated_artifact"] = artifact_summary
+            if artifact["format"] != "html":
+                state["artifact_body_text"] = artifact_text
+        state["response_message"] = response["content"]
         links = {"items": [], "skippedCount": 0}
         if bot_row:
             link_started = time.monotonic()
@@ -835,7 +887,16 @@ class AppHandler(SimpleHTTPRequestHandler):
             if (full_inspection.get("observations") or {}).get("visibleText"):
                 state["visible_report_text"] = None
         jev_started = time.monotonic()
-        result = call_jev(state, self.evaluator_model, questions)
+        result = (call_bot_jev(state, self.evaluator_model, questions) if bot_row else
+                  call_jev(state, self.evaluator_model, questions))
+        if bot_row:
+            support_state, support_questions = bot_evaluation.if_evidence_support_request(result, state)
+            if support_questions:
+                support_result = call_jev(support_state, self.evaluator_model, support_questions)
+                result["answers"].update(support_result["answers"])
+                for key, value in (support_result.get("usage") or {}).items():
+                    if isinstance(value, (int, float)):
+                        result.setdefault("usage", {})[key] = result.get("usage", {}).get(key, 0) + value
         jev_ms = round((time.monotonic() - jev_started) * 1000)
         report = rubric.parse_result(result, state, questions)
         if full_inspection is not None:

@@ -21,7 +21,11 @@ def fake_jev(state, model, questions):
                             'probabilities': {'0': 0.0, '1': 0.0, '2': 0.0, '3': 1.0}}
             continue
         choices = question['criteria']
-        preferred = 'RATED' if key.startswith('status_') else 'MET' if key.startswith('requirement_') else 'A1' if key.startswith('answer_ref_') else 'E1'
+        preferred = ('RATED' if key.startswith('status_') else
+                     'APPLIES' if key.startswith('bot_if_applicability_') else
+                     'BOTH' if key.startswith('bot_if_target_') else
+                     'MET' if key.startswith('requirement_') else
+                     'A1' if key.startswith('answer_ref_') else 'E1')
         choice = preferred if preferred in choices else 'NONE'
         answers[key] = {'choice': choice, 'confidence': .95}
     return {'model': 'jev-test-fixed', 'answers': answers}
