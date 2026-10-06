@@ -20,6 +20,63 @@ except ImportError:
 
 @unittest.skipUnless(sync_playwright, 'Playwright 미설치: 브라우저 검증 미실행')
 class BrowserTests(unittest.TestCase):
+    def test_jev_project_guide_replays_offline_file(self):
+        os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', str(Path(__file__).resolve().parents[1]/'.browsers'))
+        html = Path(__file__).resolve().parents[1] / 'static' / 'jev-project-guide.html'
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                page = browser.new_page()
+                errors = []
+                requests = []
+                page.on('pageerror', lambda error: errors.append(str(error)))
+                page.on('request', lambda request: requests.append(request.url))
+                page.goto(html.as_uri())
+                expect(page.get_by_role('heading', name='등록부터 결과 화면까지')).to_be_visible()
+                expect(page.get_by_role('heading', name='JEV에는 무엇을 묻나?')).to_be_visible()
+                expect(page.locator('#response-tabs button')).to_have_count(6)
+                expect(page.locator('#response-content')).to_contain_text("'탁월(Excellent)'")
+                expect(page.locator('#response-file-status')).to_contain_text('업로드 없음')
+                page.get_by_role('button', name='gpt-5.6-sol', exact=True).click()
+                expect(page.locator('#response-content')).to_contain_text('리포트 다운로드')
+                expect(page.locator('#response-file-status')).to_contain_text('업로드됨')
+                expect(page.locator('#response-report-excerpt')).to_contain_text('재진술의 정확성')
+                expect(page.locator('#step-title')).to_contain_text('요청·기대 결과')
+                page.get_by_role('button', name='A2', exact=True).click()
+                expect(page.locator('#reference-detail')).to_contain_text('탁월(Excellent)')
+                page.get_by_role('button', name='inspection', exact=True).click()
+                expect(page.locator('#reference-detail')).to_contain_text('null')
+                page.get_by_role('button', name='다음 단계').click()
+                expect(page.locator('#step-title')).to_contain_text('답변·자료 위치')
+                page.get_by_role('button', name='다음 단계').click()
+                expect(page.locator('#step-title')).to_contain_text('JEV Choice 판정')
+                expect(page.locator('#stage')).to_contain_text('70% / 65%')
+                expect(page.locator('#stage')).to_contain_text('87% / 86%')
+                expect(page.locator('#choice-bars .chart-row')).to_have_count(7)
+                expect(page.locator('#choice-bars .chart-row.picked')).to_contain_text('CONTRADICTION')
+                expect(page.locator('#choice-bars .chart-row.picked')).to_contain_text('70%')
+                expect(page.locator('#choice-bars')).to_contain_text('지침이 요구하거나 금지한 행동과 실제 내용이 충돌')
+                page.locator('#chart-question').select_option('bot_if_applicability_2')
+                expect(page.locator('#choice-bars .chart-row')).to_have_count(3)
+                expect(page.locator('#choice-bars .chart-row.picked')).to_contain_text('NOT_APPLICABLE')
+                expect(page.locator('#choice-bars .chart-row.picked')).to_contain_text('52%')
+                page.locator('#chart-question').select_option('bot_if_requirement_1')
+                expect(page.locator('#choice-bars .chart-row')).to_have_count(107)
+                expect(page.locator('#choice-bars .chart-row.picked')).to_contain_text('X1')
+                expect(page.locator('#choice-bars .chart-row.picked')).to_contain_text('App 지침을 우선')
+                page.locator('#choice-details summary').click()
+                expect(page.locator('#choice-rows tr')).to_have_count(18)
+                expect(page.locator('#choice-rows')).to_contain_text('NOT_APPLICABLE')
+                page.get_by_role('button', name='전체 재생').click()
+                expect(page.locator('#step-title')).to_contain_text('리포트·이력 저장')
+                page.get_by_role('button', name='앱의 근거 검사·점수').click()
+                expect(page.locator('#stage')).to_contain_text('0 / 3')
+                expect(page.locator('#stage')).to_contain_text('FILE_ABSENT')
+                self.assertEqual(errors, [])
+                self.assertEqual(requests, [html.as_uri()])
+            finally:
+                browser.close()
+
     def test_ai_bot_create_evaluate_and_version(self):
         os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH',str(Path(__file__).resolve().parents[1]/'.browsers'))
         with tempfile.TemporaryDirectory() as directory:

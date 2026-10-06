@@ -17,6 +17,7 @@ $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path (Get-Location) '.browsers'
 ```
 
 브라우저에서 http://127.0.0.1:8787 에 접속합니다. Python 3.12 이상이 필요합니다.
+AI Bot 평가의 전체 흐름과 JEV 연계를 보려면 [오프라인 프로젝트 설명 HTML](static/jev-project-guide.html)을 파일로 직접 열어 주세요. 서버와 API 키 없이 DB의 `탁월 평가 요청` 케이스·평가 이력을 발췌한 스냅샷을 재생합니다. 구현 근거는 [JEV 연계 구조](JEV_연계_구조.md)에 있습니다.
 `.env.example`을 참고해 `.env`에 TYPESAFE_API_KEY를 설정합니다. 키는 서버에서만 사용하며 화면/CSV에 내보내지 않습니다.
 기본 JEV 버전은 `jev-1.13.0`으로 고정합니다. `--model`로 변경할 수 있으며 반환된 실제 버전도 저장합니다.
 브라우저 의존성을 설치하지 않아도 텍스트 평가는 가능하지만 HTML 시각 평가가 판정 불가로 표시됩니다.
