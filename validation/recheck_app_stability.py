@@ -45,8 +45,8 @@ def summarize(rows: list[dict]) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, default=ROOT / "data/evaluations.db")
-    parser.add_argument("--packet", type=Path, default=ROOT / "data/review-v14/app-review-run.json")
-    parser.add_argument("--output", type=Path, default=ROOT / "data/review-v14/stability.json")
+    parser.add_argument("--packet", type=Path, default=ROOT / "data/review/app-review-run.json")
+    parser.add_argument("--output", type=Path, default=ROOT / "data/review/stability.json")
     parser.add_argument("--model", default="jev-1.13.0")
     parser.add_argument("--limit", type=int, default=0, help="0이면 검토 묶음 전체")
     args = parser.parse_args()

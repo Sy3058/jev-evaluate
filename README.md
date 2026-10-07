@@ -4,7 +4,7 @@
 지시사항 준수는 질문 유형이 아닌 모든 답변의 공통 평가 항목입니다.
 
 현재 상태: **사람 검토용 평가 보조 도구. 독립적인 신뢰성 검증은 미완료입니다.**
-진행 상태는 [평가기 구현 ledger](평가기_구현_LEDGER.md), [AI Bot 평가 ledger](AI_BOT_평가_LEDGER.md), [AI Bot 정수 평가 ledger](AI_BOT_정수평가_LEDGER.md)를 확인하세요. 모델 평가 기준은 [RUBRIC.md](RUBRIC.md)에 있습니다. 평가 기준의 버전별 변경 이유와 Git 기록 규칙은 [VERSION_HISTORY.md](VERSION_HISTORY.md)에 있습니다.
+현재 평가 동작과 제한은 이 README와 `evaluation.py`·`bot_evaluation.py`에 설명되어 있습니다. 평가 기준의 버전별 변경 이유와 Git 기록 규칙은 [VERSION_HISTORY.md](VERSION_HISTORY.md)에 있습니다. 과거 구현 계획과 검증 보고서는 이전 Git 커밋에서 확인할 수 있습니다.
 
 ## 실행 (Windows PowerShell)
 
@@ -17,7 +17,7 @@ $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path (Get-Location) '.browsers'
 ```
 
 브라우저에서 http://127.0.0.1:8787 에 접속합니다. Python 3.12 이상이 필요합니다.
-AI Bot 평가의 전체 흐름과 JEV 연계를 보려면 [오프라인 프로젝트 설명 HTML](static/jev-project-guide.html)을 파일로 직접 열어 주세요. 서버와 API 키 없이 DB의 `탁월 평가 요청` 케이스·평가 이력을 발췌한 스냅샷을 재생합니다. 구현 근거는 [JEV 연계 구조](JEV_연계_구조.md)에 있습니다.
+AI Bot 평가의 전체 흐름과 JEV 연계를 보려면 [오프라인 프로젝트 설명 HTML](static/jev-project-guide.html)을 파일로 직접 열어 주세요. 서버와 API 키 없이 DB의 `탁월 평가 요청` 케이스·평가 이력을 발췌한 스냅샷을 재생합니다. 현재 구현은 `server.py`, `evaluation.py`, `bot_evaluation.py`에서 확인할 수 있습니다.
 `.env.example`을 참고해 `.env`에 TYPESAFE_API_KEY를 설정합니다. 키는 서버에서만 사용하며 화면/CSV에 내보내지 않습니다. 자동 웹 검색은 사용하지 않습니다. 일반 모델의 사실성 평가는 등록 자료와 기준 답안을 대조합니다. 일반지식 또는 등록 근거가 없는 비코딩 대화에서 답변이 공개 HTTPS 링크를 인용하면 해당 URL의 본문을 확인해 대조할 수 있습니다. URL 본문 확인은 새 자료를 찾는 웹 검색이 아닙니다. 확인된 근거가 없는 사실 주장에는 Truthfulness 점수를 주지 않고 미검증으로 표시합니다.
 기본 JEV 버전은 `jev-1.13.0`으로 고정합니다. `--model`로 변경할 수 있으며 반환된 실제 버전도 저장합니다.
 브라우저 의존성을 설치하지 않아도 텍스트 평가는 가능하지만 HTML 시각 평가가 판정 불가로 표시됩니다.
@@ -122,21 +122,21 @@ Docker와 로컬 `python:3.12-slim` 이미지가 필요합니다. 앱은 이미�
 
 ```powershell
 # 자동 검사만; JEV 미호출
-.\.venv\Scripts\python.exe validate.py --split all --output validation/offline-run.json
+.\.venv\Scripts\python.exe validate.py --split all --output data/validation/offline-run.json
 # 고정 버전으로 조정용 사례를 3회 평가
-.\.venv\Scripts\python.exe validate.py --live --split calibration --repeats 3 --output validation/calibration-new.json
+.\.venv\Scripts\python.exe validate.py --live --split calibration --repeats 3 --output data/validation/calibration-run.json
 # 일반지식·첨부자료·추론의 원문 일치·모순·근거 부족, 권고·과장·중복 사례를 실제 JEV로 진단
 .\.venv\Scripts\python.exe validation/smoke_fact.py
 # HTML/거절/주입 변형 진단
-.\.venv\Scripts\python.exe validate.py --live --cases validation/metamorphic.json --repeats 3 --output validation/metamorphic-run.json
+.\.venv\Scripts\python.exe validate.py --live --cases validation/metamorphic.json --repeats 3 --output data/validation/metamorphic-run.json
 # 독립적인 사람 라벨이 준비된 뒤 최종 검증
-.\.venv\Scripts\python.exe validate.py --live --split holdout --labels validation/human-labels.json --output validation/holdout-run.json
+.\.venv\Scripts\python.exe validate.py --live --split holdout --labels data/validation/human-labels.json --output data/validation/holdout-run.json
 # 저장한 결과를 사람 라벨과 다시 비교 (API 호출 없음)
-.\.venv\Scripts\python.exe validate.py --report-from validation/holdout-run.json --labels validation/human-labels.json --output validation/metrics.json
+.\.venv\Scripts\python.exe validate.py --report-from data/validation/holdout-run.json --labels data/validation/human-labels.json --output data/validation/metrics.json
 ```
 
 예제는 AI가 작성한 합성 진단 자료이며 독립적인 사람 정답이 아닙니다. 최종 검증용 자료는 조정에 사용하지 않습니다.
-`cases.human-labels.template.json`의 reviewer, humanReviewed, axes를 사람이 작성해야 정확도 집계에 포함됩니다.
+`validation/cases.human-labels.template.json`을 `data/validation/human-labels.json`으로 복사한 뒤 reviewer, humanReviewed, axes를 사람이 작성해야 정확도 집계에 포함됩니다.
 일반 모델의 비코딩 사례는 같은 파일의 `claims`에도 주장별 `relation`(SUPPORTED, CONTRADICTED, UNVERIFIED, NOT_APPLICABLE)을 사람이 Jev 결과를 보기 전에 기록할 수 있습니다. `missingClaims`에는 자동 추출에서 빠진 주장과 관계를 기록합니다. 실평가 검증은 앱과 동일한 서버 평가 경로를 사용하며, `factClaims` 지표에 주장 관계 일치율·모순 누락·잘못된 모순 판정·미검증 건수·사람이 확인한 모순을 3점·검토 불필요로 통과시킨 건수를 따로 냅니다. 사람 라벨이 없으면 이 지표는 신뢰성 검증 결과가 아닙니다.
 
 실제 앱에 저장된 일반 모델 평가를 사람이 검토할 때는 현재 기준으로 평가된 결과만 로컬 파일로 내보낼 수 있습니다. 출력에는 질문·답변·등록 자료가 포함되므로 기본 저장 위치는 Git에서 제외한 `data/review`입니다. 로컬 `validation/review_labels.html`을 브라우저에서 열고 라벨 템플릿 JSON을 선택하면 Jev의 판정을 보지 않고 주장별 관계·중요도·누락을 기록해 새 JSON으로 내려받을 수 있습니다. Jev 결과 파일은 사람 판정을 마친 뒤에 열어 비교합니다. 앱 데이터에서 뽑은 사례는 자동으로 독립적인 홀드아웃 표본이 되지 않습니다.
