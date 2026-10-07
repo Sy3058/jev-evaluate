@@ -149,7 +149,7 @@ class BrowserTests(unittest.TestCase):
                                 scoringMethod:'confirmed_claim_contradictions',needsReview:true,notes:[]}},
                             factVerification:{score:1,status:'rated',claimCount:1,verifiedCount:1,
                                 unverifiedCount:0,lowConfidenceVerifiedCount:1,skippedCandidateCount:0,
-                                searchAttempts:[],claims:[{id:'C1',text:'잘못된 사실',importance:'HIGH',
+                                claims:[{id:'C1',text:'잘못된 사실',importance:'HIGH',
                                     relation:'CONTRADICTED',sourceRef:'E1',sourceText:'확인한 원문',
                                     importanceConfidence:.92,relationConfidence:.41,sourceConfidence:.96,
                                     lowConfidenceFields:['relationConfidence']}]},
@@ -164,7 +164,7 @@ class BrowserTests(unittest.TestCase):
                                 scoringMethod:'confirmed_claim_contradictions',needsReview:true,notes:[]}},
                             factVerification:{score:null,status:'unverifiable',claimCount:0,verifiedCount:0,
                                 unverifiedCount:0,lowConfidenceExcludedCount:1,skippedCandidateCount:0,
-                                searchAttempts:[],claims:[{id:'C1',text:'행사는 화요일입니다.',
+                                claims:[{id:'C1',text:'행사는 화요일입니다.',
                                     importance:'NONE',relation:'NOT_APPLICABLE',sourceRef:'NONE',
                                     importanceConfidence:.38,lowConfidenceFields:['importanceConfidence']}]},
                             requirements:[],checks:[],issues:[],sourceMetadata:{}

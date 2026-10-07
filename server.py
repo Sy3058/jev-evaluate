@@ -111,8 +111,8 @@ def settings_digest(case: dict, spec: dict) -> str:
     return rubric.digest(value)
 
 
-def model_fact_search_enabled(case: dict, spec: dict) -> bool:
-    """Search open chat; keep source-bound non-general tasks local by default."""
+def model_cited_link_check_enabled(case: dict, spec: dict) -> bool:
+    """Check URLs already cited in open chat, without discovering new pages."""
     if case["evaluation_mode"] != "model" or case["category"] == "코딩":
         return False
     if case["category"] == "일반지식·설명":
@@ -123,9 +123,6 @@ def model_fact_search_enabled(case: dict, spec: dict) -> bool:
 
 def evaluation_fingerprint(case: dict, response: dict, artifact: dict | None,
                            spec: dict, evaluator_model: str) -> str:
-    search_mode = None
-    if model_fact_search_enabled(case, spec):
-        search_mode = "brave" if os.environ.get("BRAVE_SEARCH_API_KEY", "").strip() else "none"
     value = {"settings": settings_digest(case, spec), "response": response["content"],
                           "responseModel": response["model"], "artifactSha256": artifact["sha256"] if artifact else None,
                           "artifactFilename": artifact["filename"] if artifact else None,
@@ -133,15 +130,13 @@ def evaluation_fingerprint(case: dict, response: dict, artifact: dict | None,
                           "rubricVersion": rubric.BASE_VERSION if case["evaluation_mode"] == "ai_bot" else rubric.VERSION,
                           "botQualityVersion": bot_evaluation.QUALITY_VERSION if case["evaluation_mode"] == "ai_bot" else None,
                           "botInstructionVersion": bot_evaluation.VERSION if case["evaluation_mode"] == "ai_bot" else None}
-    if search_mode is not None:
-        value["factSearchMode"] = search_mode
     return rubric.digest(value)
 
 
 def web_evidence_expired(report: dict, evaluated_at: str) -> bool:
-    """Web-backed and attempted fact checks are refreshed after one day."""
+    """Checks of cited page bodies are refreshed after one day."""
     fact = report.get("factVerification") or {}
-    if not fact or not (fact.get("searchAttempts") or (report.get("linkVerification") or {}).get("items")):
+    if not fact or not (report.get("linkVerification") or {}).get("items"):
         return False
     try:
         age = datetime.now(UTC) - datetime.fromisoformat(evaluated_at)
@@ -844,7 +839,6 @@ class AppHandler(SimpleHTTPRequestHandler):
         started = time.monotonic()
         html_ms = 0
         link_ms = 0
-        search_ms = 0
         # Release DB connection before browser/network work.
         with connect(self.db_path) as db:
             response_row = db.execute("SELECT * FROM responses WHERE id = ?", (response_id,)).fetchone()
@@ -861,7 +855,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 if not bot_row:
                     raise ValueError("적용할 Bot 지침 버전을 찾을 수 없습니다.")
         spec = rubric.normalize_spec(json.loads(case["evaluation_spec_json"]), case["prompt"])
-        fact_search_enabled = model_fact_search_enabled(case, spec)
+        cited_link_check_enabled = model_cited_link_check_enabled(case, spec)
         effective_spec = ({**spec, "outputFormat": "html"}
                           if artifact and artifact["format"] == "html" and spec["outputFormat"] == "text" else spec)
         evaluation_case = ({**case, "evaluation_spec_json": json.dumps(effective_spec, ensure_ascii=False)}
@@ -906,7 +900,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             visible_text = ((state.get("inspection") or {}).get("observations") or {}).get("visibleText")
             fact_claims, fact_skipped = fact_verification.candidates(visible_text or effective_content)
         links = {"items": [], "skippedCount": 0}
-        if bot_row or (fact_claims and fact_search_enabled):
+        if bot_row or (fact_claims and cited_link_check_enabled):
             link_started = time.monotonic()
             links = check_answer_links(self.db_path, effective_content)
             add_web_sources(state, questions, links)
@@ -981,26 +975,12 @@ class AppHandler(SimpleHTTPRequestHandler):
                 if case["category"] == "추론·문제해결":
                     fact_verification.apply_exact_numeric_reference(
                         rows, spec["expectedAnswer"], fact_state["sources"], fact_state["source_metadata"])
-                added, attempts = {}, []
-                if fact_search_enabled:
-                    search_started = time.monotonic()
-                    added, attempts = fact_verification.retrieve(rows, fact_state["sources"], fact_state["source_metadata"])
-                    search_ms = round((time.monotonic() - search_started) * 1000)
-                if added:
-                    fact_state["sources"].update(added)
-                    unresolved = {row["id"]: row["text"] for row in rows
-                                  if row["importance"] == "HIGH" and row["relation"] == "UNVERIFIED"}
-                    if unresolved:
-                        searched_jev_started = time.monotonic()
-                        searched_raw = call_jev(fact_state, self.evaluator_model,
-                                                fact_verification.questions(unresolved, fact_state["sources"]))
-                        jev_ms += round((time.monotonic() - searched_jev_started) * 1000)
-                        revised = {row["id"]: row for row in fact_verification.parse(
-                            searched_raw, unresolved, fact_state["sources"])}
-                        rows = [revised.get(row["id"], row) for row in rows]
-                    result["factSearchEvaluation"] = searched_raw if unresolved else None
-                fact_report = fact_verification.score(rows, skipped, attempts,
-                                                       search_enabled=fact_search_enabled)
+                fact_report = fact_verification.score(rows, skipped)
+                cited_refs = {source_id for source_id, metadata in fact_state["source_metadata"].items()
+                              if metadata.get("kind") == "verified_cited_web_page"}
+                cited_count = sum(row["sourceRef"] in cited_refs for row in rows)
+                fact_report["citedEvidenceReviewCount"] = cited_count
+                fact_report["needsReview"] = fact_report["needsReview"] or bool(cited_count)
                 report["factVerification"] = fact_report
                 report["sourceMetadata"].update(fact_state["source_metadata"])
                 axis = report["axes"]["truthfulness"]
@@ -1009,7 +989,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                              "probabilities": None, "scoringMethod": "confirmed_claim_contradictions",
                              "description": ("근거와 모순으로 판정된 주장의 개수와 중요도로 계산한 점수입니다. 미검증 주장은 감점하지 않습니다."
                                              if fact_report["status"] == "rated" else
-                                             "검사 상한 밖 후보 또는 낮은 확신도의 비사실 판정이 있어 사실 주장 여부를 확정하지 못했습니다."
+                                             "근거로 직접 대조한 사실 주장이 없거나 사실 주장 여부를 확정하지 못해 점수를 보류했습니다."
                                              if fact_report["status"] == "unverifiable" else
                                              "검증 가능한 사실 주장이 없습니다."),
                              "needsReview": fact_report["needsReview"]})
@@ -1019,7 +999,11 @@ class AppHandler(SimpleHTTPRequestHandler):
                              "answerText": first_evidence["text"] if first_evidence else None,
                              "sourceRef": first_evidence["sourceRef"] if first_evidence else "NONE",
                              "sourceText": first_evidence["sourceText"] if first_evidence else None,
-                             "notes": ((["미검증 주장은 감점하지 않았습니다."] if fact_report["unverifiedCount"] else []) +
+                             "notes": ((["확인된 근거가 없어 Truthfulness 점수를 보류했습니다."]
+                                        if fact_report["unverifiedCount"] and not fact_report["verifiedCount"] else
+                                        ["미검증 주장은 감점하지 않았습니다."] if fact_report["unverifiedCount"] else []) +
+                                       ([f"답변 인용 링크의 본문으로 대조한 주장 {cited_count}개는 출처의 신뢰성이 별도 확인되지 않아 검토 필요로 표시했습니다."]
+                                        if cited_count else []) +
                                        ([f"근거 대조 판정의 선택 확신도가 낮거나 없는 주장 {fact_report['lowConfidenceVerifiedCount']}개는 점수를 유지하고 검토 필요로 표시했습니다."]
                                         if fact_report["lowConfidenceVerifiedCount"] else []))})
                 report["issues"] = [issue for issue in report["issues"]
@@ -1030,8 +1014,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         elif not bot_row and case["category"] != "코딩":
             # A nonempty answer with no extractable span is not evidence that it has no facts.
             unextracted = bool(effective_content.strip())
-            fact_report = fact_verification.score([], fact_skipped, [],
-                                                   search_enabled=fact_search_enabled)
+            fact_report = fact_verification.score([], fact_skipped)
             fact_report["status"] = "unverifiable" if unextracted else "not_applicable"
             fact_report["needsReview"] = unextracted
             fact_report["extractionIssue"] = ("답변에서 대조할 주장 위치를 추출하지 못했습니다."
@@ -1060,7 +1043,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         report["evaluatorModel"] = str(result.get("model", self.evaluator_model))
         report["requestedEvaluatorModel"] = self.evaluator_model
         report["timings"] = {"htmlInspectionMs": html_ms, "linkCheckMs": link_ms,
-                             "webSearchMs": search_ms, "jevMs": jev_ms,
+                             "jevMs": jev_ms,
                              "totalMs": round((time.monotonic() - started) * 1000)}
         scores = {key: value["score"] for key, value in report["axes"].items()}
         raw = {"rubric_version": report["rubricVersion"], "report": report, "quality": result,

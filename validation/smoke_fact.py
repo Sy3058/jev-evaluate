@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import tempfile
 from pathlib import Path
@@ -21,12 +20,14 @@ def main() -> None:
         handler.db_path = Path(directory) / "smoke.db"
         init_db(handler.db_path)
         cases = [
+            ("no_evidence", "일반지식·설명", "",
+             "무료 요금제에서는 파일을 내보낼 수 있습니다.", "UNVERIFIED", None, False),
             ("supported", "일반지식·설명", "무료 요금제에서는 파일을 내보낼 수 없습니다.",
              "무료 요금제에서는 파일을 내보낼 수 없습니다.", "SUPPORTED", 3, False),
             ("contradicted", "일반지식·설명", "무료 요금제에서는 파일을 내보낼 수 없습니다.",
              "무료 요금제에서는 파일을 내보낼 수 있습니다.", "CONTRADICTED", 1, False),
             ("irrelevant_source", "일반지식·설명", "서울은 대한민국의 수도입니다.",
-             "무료 요금제에서는 파일을 내보낼 수 있습니다.", "UNVERIFIED", 3, False),
+             "무료 요금제에서는 파일을 내보낼 수 있습니다.", "UNVERIFIED", None, False),
             ("document_supported", "강의·첨부자료", "행사는 월요일에 열립니다.",
              "행사는 월요일에 열립니다.", "SUPPORTED", 3, True),
             ("reasoning_contradicted", "추론·문제해결", "두 수의 합은 12입니다.",
@@ -38,19 +39,19 @@ def main() -> None:
             ("wrong_speaker", "강의·첨부자료", "민수가 발표했습니다. 지수는 기록했습니다.",
              "지수가 발표했습니다.", "CONTRADICTED", 1, True),
             ("invented_event", "강의·첨부자료", "행사는 월요일에 열립니다.",
-             "행사에서 투표를 진행했습니다.", "UNVERIFIED", 3, True),
+             "행사에서 투표를 진행했습니다.", "UNVERIFIED", None, True),
             ("recommendation", "강의·첨부자료", "행사는 월요일에 열립니다.",
              "다음에는 투표를 진행하는 것이 좋겠습니다.", "NOT_APPLICABLE", None, True),
             ("unsupported_consensus", "강의·첨부자료", "참석자 3명이 동의했습니다.",
-             "참석자 전원이 동의했습니다.", "UNVERIFIED", 3, True),
+             "참석자 전원이 동의했습니다.", "UNVERIFIED", None, True),
             ("repeated_contradiction", "강의·첨부자료", "행사는 월요일에 열립니다.",
              "행사는 화요일에 열립니다. 행사는 화요일에 열립니다.", "CONTRADICTED", 1, True),
             ("partial_support", "일반지식·설명", "기본 요금제는 최대 10명까지 사용할 수 있습니다.",
-             "기본 요금제는 최대 10명까지 사용할 수 있고 파일 내보내기도 지원합니다.", "UNVERIFIED", 3, False),
+             "기본 요금제는 최대 10명까지 사용할 수 있고 파일 내보내기도 지원합니다.", "UNVERIFIED", None, False),
             ("wrong_plan", "일반지식·설명", "A 요금제는 파일 내보내기를 지원합니다. B 요금제는 지원하지 않습니다.",
              "B 요금제는 파일 내보내기를 지원합니다.", "CONTRADICTED", 1, False),
             ("future_as_current", "일반지식·설명", "2027년에 파일 내보내기를 도입할 계획입니다.",
-             "현재 파일 내보내기를 지원합니다.", "UNVERIFIED", 3, False),
+             "현재 파일 내보내기를 지원합니다.", "UNVERIFIED", None, False),
         ]
         parser = argparse.ArgumentParser(description=__doc__)
         parser.add_argument("--case", help="특정 진단 사례 이름만 실행")
@@ -77,7 +78,7 @@ def main() -> None:
                 captured.update(result.get("answers", {}))
                 return result
             try:
-                with patch.dict(os.environ, {"BRAVE_SEARCH_API_KEY": ""}), patch("server.call_jev", side_effect=capture):
+                with patch("server.call_jev", side_effect=capture):
                     report = handler.evaluate(created["responses"][0]["id"])["report"]
             except Exception as exc:
                 scores = {key: {"score": value.get("score"), "probabilities": value.get("probabilities")}
