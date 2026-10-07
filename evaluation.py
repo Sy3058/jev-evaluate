@@ -15,7 +15,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 BASE_VERSION = "five-axis-v3-score"
-VERSION = "five-axis-v15-evidence-only"
+VERSION = "five-axis-v16-section-evidence"
 CATEGORIES = ["코딩", "강의·첨부자료", "일반지식·설명", "추론·문제해결"]
 LABELS = {
     "instruction_following": "Instruction Following",
@@ -131,9 +131,12 @@ def normalize_spec(value: Any, prompt: str) -> dict:
             "codeTests": code_tests}
 
 
-def segments(text: str, prefix: str) -> dict[str, str]:
+def segments(text: str, prefix: str, section_headings: bool = False) -> dict[str, str]:
     # IDs are citation locations, not equal-weight completeness units.
-    paragraphs = re.split(r"\n\s*\n", text.strip())
+    body = text.strip()
+    sections = (re.split(r"(?m)(?=^\s*(?:S\d+[.)]\s+|#{1,6}\s+))", body)
+                if section_headings else [body])
+    paragraphs = (sections if len(sections) > 1 else re.split(r"\n\s*\n", body))
     chunks = []
     for paragraph in paragraphs:
         paragraph = paragraph.strip()
@@ -197,7 +200,8 @@ def run_checks(text: str, spec: dict) -> list[dict]:
     return results
 
 
-def prepare(case: dict, response: dict, inspection: dict | None = None, code_execution: dict | None = None) -> tuple[dict, dict]:
+def prepare(case: dict, response: dict, inspection: dict | None = None,
+            code_execution: dict | None = None, section_sources: bool = False) -> tuple[dict, dict]:
     if case["category"] not in CATEGORIES:
         raise ValueError("기존 질문 유형을 네 유형 중 하나로 재분류해야 합니다.")
     spec = normalize_spec(json.loads(case.get("evaluation_spec_json") or "{}"), case["prompt"])
@@ -210,7 +214,7 @@ def prepare(case: dict, response: dict, inspection: dict | None = None, code_exe
                    ("등록 기준 답안", spec["expectedAnswer"], "reference_answer", None)]
     source_sets += [(ref["title"], ref["text"], "registered_primary_source", ref) for ref in spec["references"]]
     for title, body, kind, metadata in source_sets:
-        for value in segments(body, "E").values():
+        for value in segments(body, "E", section_headings=section_sources).values():
             key = f"E{len(sources) + 1}"
             sources[key] = value
             source_meta[key] = {"title": title, "kind": kind, "reference": metadata}

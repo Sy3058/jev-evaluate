@@ -246,6 +246,33 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(rows[0]['score_type'],'expected_level_0_3')
         self.assertEqual(json.loads(rows[0]['report_json'])['axes']['truthfulness']['score'],3)
 
+    def test_section_evidence_limits_truthfulness_to_relevant_section(self):
+        attachment = ("S1. 서비스와 운영 일정\n"
+            "루미워크는 팀의 회의 안건, 결정 사항, 후속 과제를 정리하는 웹 서비스다.\n"
+            "시범 운영은 2026년 8월 1일부터 8월 31일까지 진행했다. 정식 서비스 시작일은 2026년 10월 1일이다.\n"
+            + "\n".join(f"S{i}. 다른 정보\n이 절은 서비스 시작일과 관계없는 내용이다." for i in range(2, 7)))
+        answer = "루미워크는 회의 안건, 결정 사항, 후속 과제를 정리하는 웹 서비스이며 정식 서비스 시작일은 2026년 10월 1일입니다."
+        created = self.handler.create_case({'title':'sections','category':'강의·첨부자료',
+            'prompt':'서비스를 설명해줘.','attachmentText':attachment,
+            'responses':{'gpt-5.6-sol':answer},'evaluationSpec':{'confirmed':True}})
+        rid = created['responses'][0]['id']
+        def judge(state, model, questions):
+            self.assertEqual(len(state['sources']), 6)
+            self.assertIn('정식 서비스 시작일은 2026년 10월 1일', state['sources']['E1'])
+            self.assertNotIn('S2.', state['sources']['E1'])
+            raw = fake_jev(state, model, questions)
+            raw['answers']['fact_kind_C1'] = {'choice':'HIGH','confidence':.95}
+            raw['answers']['fact_relation_C1'] = {'choice':'SUPPORTED','confidence':.95}
+            raw['answers']['fact_source_C1'] = {'choice':'E1','confidence':.95}
+            return raw
+        with patch('server.call_jev', side_effect=judge):
+            report = self.handler.evaluate(rid)['report']
+        claim = report['factVerification']['claims'][0]
+        self.assertEqual(claim['sourceRef'], 'E1')
+        self.assertIn('회의 안건, 결정 사항, 후속 과제', claim['sourceText'])
+        self.assertNotIn('S2.', claim['sourceText'])
+        self.assertEqual(report['axes']['truthfulness']['score'], 3)
+
     def test_general_chat_uses_registered_evidence(self):
         created=self.handler.create_case({'title':'facts','category':'일반지식·설명',
             'prompt':'파일 내보내기가 가능한가?',

@@ -75,22 +75,8 @@ button:disabled { opacity: .55; cursor: wait; }
 .summary-card small { color: #bdc6bf; }
 .metric-list { display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #465149; font-size: 11px; color: #bdc6bf; }
 .metric-list b { color: white; font-variant-numeric: tabular-nums; }
-.score-details { margin-top: 7px; }
-.score-details summary { cursor: pointer; color: var(--green); font-size: 11px; }
-.score-details dl { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; min-width: 210px; }
-.score-details dt, .score-details dd { margin: 0; font-size: 11px; }
-.evidence-details { margin-top: 8px; }
-.evidence-details summary { cursor: pointer; color: var(--green); font-size: 11px; font-weight: 700; }
-.claim-list { display: grid; gap: 8px; margin-top: 10px; min-width: 420px; }
 .claim-card { padding: 10px; border: 1px solid var(--line); border-left: 4px solid #c4a944; border-radius: 8px; background: #fff; }
-.claim-card.supported { border-left-color: #2f8b61; }
-.claim-card.contradicted { border-left-color: var(--orange); }
-.claim-head { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
-.claim-head b, .evidence-quote b { font: 800 11px ui-monospace, monospace; color: var(--green); }
-.claim-head span { font-size: 11px; font-weight: 750; }
-.claim-head small { margin-left: auto; color: var(--muted); }
 .claim-card p { font-size: 12px; line-height: 1.55; }
-.evidence-quote { display: grid; grid-template-columns: auto 1fr; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 11px; line-height: 1.5; color: var(--muted); }
 .table-wrap { overflow-x: auto; }
 [hidden] { display: none !important; }
 .case-row > td { vertical-align: top; }

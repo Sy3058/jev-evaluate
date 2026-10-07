@@ -146,7 +146,8 @@ class BrowserTests(unittest.TestCase):
                         fact_html=page.evaluate("""() => reportDetails({
                             scoreType:'expected_level_0_3',
                             axes:{truthfulness:{score:1,status:'rated',description:'근거 대조',
-                                scoringMethod:'confirmed_claim_contradictions',needsReview:true,notes:[]}},
+                                scoringMethod:'confirmed_claim_contradictions',needsReview:true,notes:[],
+                                answerRef:'C1',answerText:'잘못된 사실',sourceRef:'E1',sourceText:'확인한 원문'}},
                             factVerification:{score:1,status:'rated',claimCount:1,verifiedCount:1,
                                 unverifiedCount:0,lowConfidenceVerifiedCount:1,skippedCandidateCount:0,
                                 claims:[{id:'C1',text:'잘못된 사실',importance:'HIGH',
@@ -158,6 +159,7 @@ class BrowserTests(unittest.TestCase):
                         self.assertIn('선택 확신도 낮거나 없는 근거 대조 1개',fact_html)
                         self.assertIn('판정 검토 필요',fact_html)
                         self.assertIn('관계 0.41',fact_html)
+                        self.assertEqual(fact_html.count('확인한 원문'),1)
                         unknown_html=page.evaluate("""() => reportDetails({
                             scoreType:'expected_level_0_3',
                             axes:{truthfulness:{score:null,status:'unverifiable',description:'판정 보류',

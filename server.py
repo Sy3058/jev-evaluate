@@ -877,7 +877,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                         len(case["check_focus"]) + len(case["expected_behavior"]) + len(case["input_example"]) > 160000):
             raise ValueError("Bot 지침을 포함한 평가 입력이 160,000자를 초과합니다.")
         # Validate before launching optional browser or invoking paid API.
-        state, questions = rubric.prepare(evaluation_case, effective_response)
+        state, questions = rubric.prepare(evaluation_case, effective_response, section_sources=not bot_row)
         if effective_spec["outputFormat"] == "html":
             html_started = time.monotonic()
             html_content = (artifact_text if artifact and artifact["format"] == "html" else response["content"])
@@ -885,11 +885,13 @@ class AppHandler(SimpleHTTPRequestHandler):
                 html_content = (self.db_path.parent / "uploads" / artifact["storage_name"]).read_text(encoding="utf-8-sig")
             inspection = html_inspection(html_content)
             inspection.update(inspect_html(html_content, self.db_path.parent / "artifacts"))
-            state, questions = rubric.prepare(evaluation_case, effective_response, inspection)
+            state, questions = rubric.prepare(evaluation_case, effective_response, inspection,
+                                              section_sources=not bot_row)
             html_ms = round((time.monotonic() - html_started) * 1000)
         if spec["codeTests"]:
             execution = run_python(rubric.python_source(effective_content), spec["codeTests"])
-            state, questions = rubric.prepare(evaluation_case, effective_response, code_execution=execution)
+            state, questions = rubric.prepare(evaluation_case, effective_response,
+                                              code_execution=execution, section_sources=not bot_row)
         if artifact_summary:
             state["generated_artifact"] = artifact_summary
             if artifact["format"] != "html":

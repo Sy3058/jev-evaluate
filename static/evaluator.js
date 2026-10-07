@@ -98,7 +98,7 @@ function modelQualityAxis(key, a, report, factDetails='') {
   return `<details class="quality-axis" ${open ? 'open' : ''}><summary><b>${esc(config.criteria[key])}: ${axisCell(a, report.scoreType)}</b><span>${esc(a.description)}</span></summary>
     ${a.scoringMethod === 'confirmed_claim_contradictions' ? '<p class="hint">근거와 모순으로 판정된 주장의 개수와 중요도로 계산한 정수 점수입니다. 미검증 주장은 감점하지 않습니다. 선택 확신도가 낮은 판정은 검토 필요로 표시합니다.</p>' : `<p>JEV 확신도: ${typeof a.confidence === 'number' ? a.confidence.toFixed(2) : '미제공'} (정확도 보장 아님)</p>`}
     ${report.scoreType === 'expected_level_0_3' && a.status === 'rated' && a.probabilities ? `<p>단계별 확률: ${[0,1,2,3].map(n=>`${n}점 ${((a.probabilities[String(n)] || 0)*100).toFixed(1)}%`).join(' · ')}</p><p class="hint">점수는 단계별 확률의 가중 평균입니다. 표시된 설명은 가장 가능성 높은 단계 기준입니다.</p>` : ''}
-    ${a.answerText ? `<div class="linked-evidence"><div><strong>답변 · ${esc(a.answerRef)}</strong><p>${esc(a.answerText)}</p></div>${a.sourceText ? `<div><strong>근거 · ${esc(a.sourceRef)}</strong><p>${esc(a.sourceText)}</p></div>` : ''}</div>` : a.sourceText ? `<p>근거 ${esc(a.sourceRef)}: ${esc(a.sourceText)}</p>` : ''}
+    ${key === 'truthfulness' && report.factVerification ? '' : a.answerText ? `<div class="linked-evidence"><div><strong>답변 · ${esc(a.answerRef)}</strong><p>${esc(a.answerText)}</p></div>${a.sourceText ? `<div><strong>근거 · ${esc(a.sourceRef)}</strong><p>${esc(a.sourceText)}</p></div>` : ''}</div>` : a.sourceText ? `<p>근거 ${esc(a.sourceRef)}: ${esc(a.sourceText)}</p>` : ''}
     ${a.notes?.map(n=>`<p class="hint">${esc(n)}</p>`).join('') || ''}${requirementDetails}${factDetails}
   </details>`;
 }
