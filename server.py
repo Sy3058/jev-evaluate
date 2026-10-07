@@ -26,6 +26,7 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 import evaluation as rubric
 import bot_evaluation
 import link_verification
+import fact_verification
 from rendering import inspect_html
 from code_runner import run_python
 from generated_files import MAX_FILE_BYTES, inspect_generated_file
@@ -110,14 +111,43 @@ def settings_digest(case: dict, spec: dict) -> str:
     return rubric.digest(value)
 
 
+def model_fact_search_enabled(case: dict, spec: dict) -> bool:
+    """Search open chat; keep source-bound non-general tasks local by default."""
+    if case["evaluation_mode"] != "model" or case["category"] == "코딩":
+        return False
+    if case["category"] == "일반지식·설명":
+        return True
+    return not (str(dict(case).get("attachment_text") or "").strip() or
+                str(spec.get("expectedAnswer") or "").strip() or spec.get("references"))
+
+
 def evaluation_fingerprint(case: dict, response: dict, artifact: dict | None,
                            spec: dict, evaluator_model: str) -> str:
-    return rubric.digest({"settings": settings_digest(case, spec), "response": response["content"],
+    search_mode = None
+    if model_fact_search_enabled(case, spec):
+        search_mode = "brave" if os.environ.get("BRAVE_SEARCH_API_KEY", "").strip() else "none"
+    value = {"settings": settings_digest(case, spec), "response": response["content"],
                           "responseModel": response["model"], "artifactSha256": artifact["sha256"] if artifact else None,
                           "artifactFilename": artifact["filename"] if artifact else None,
-                          "evaluatorModel": evaluator_model, "rubricVersion": rubric.VERSION,
+                          "evaluatorModel": evaluator_model,
+                          "rubricVersion": rubric.BASE_VERSION if case["evaluation_mode"] == "ai_bot" else rubric.VERSION,
                           "botQualityVersion": bot_evaluation.QUALITY_VERSION if case["evaluation_mode"] == "ai_bot" else None,
-                          "botInstructionVersion": bot_evaluation.VERSION if case["evaluation_mode"] == "ai_bot" else None})
+                          "botInstructionVersion": bot_evaluation.VERSION if case["evaluation_mode"] == "ai_bot" else None}
+    if search_mode is not None:
+        value["factSearchMode"] = search_mode
+    return rubric.digest(value)
+
+
+def web_evidence_expired(report: dict, evaluated_at: str) -> bool:
+    """Web-backed and attempted fact checks are refreshed after one day."""
+    fact = report.get("factVerification") or {}
+    if not fact or not (fact.get("searchAttempts") or (report.get("linkVerification") or {}).get("items")):
+        return False
+    try:
+        age = datetime.now(UTC) - datetime.fromisoformat(evaluated_at)
+    except (TypeError, ValueError):
+        return True
+    return age >= timedelta(days=1) or age < timedelta(0)
 
 
 class EvaluationInProgress(ValueError):
@@ -778,6 +808,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 report.get("artifactSha256") != (artifact["sha256"] if artifact else None) or
                 (report.get("generatedArtifact") or {}).get("filename") != (artifact["filename"] if artifact else None) or
                 report.get("requestedEvaluatorModel", report.get("evaluatorModel")) != self.evaluator_model or
+                web_evidence_expired(report, latest["created_at"]) or
                 report.get("evaluationFingerprint", fingerprint) != fingerprint):
             return None
         return {"id": latest["id"], "responseId": response_id, "scores": json.loads(latest["scores_json"]),
@@ -813,6 +844,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         started = time.monotonic()
         html_ms = 0
         link_ms = 0
+        search_ms = 0
         # Release DB connection before browser/network work.
         with connect(self.db_path) as db:
             response_row = db.execute("SELECT * FROM responses WHERE id = ?", (response_id,)).fetchone()
@@ -829,6 +861,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 if not bot_row:
                     raise ValueError("적용할 Bot 지침 버전을 찾을 수 없습니다.")
         spec = rubric.normalize_spec(json.loads(case["evaluation_spec_json"]), case["prompt"])
+        fact_search_enabled = model_fact_search_enabled(case, spec)
         effective_spec = ({**spec, "outputFormat": "html"}
                           if artifact and artifact["format"] == "html" and spec["outputFormat"] == "text" else spec)
         evaluation_case = ({**case, "evaluation_spec_json": json.dumps(effective_spec, ensure_ascii=False)}
@@ -868,12 +901,20 @@ class AppHandler(SimpleHTTPRequestHandler):
             if artifact["format"] != "html":
                 state["artifact_body_text"] = artifact_text
         state["response_message"] = response["content"]
+        fact_claims, fact_skipped = {}, 0
+        if not bot_row and case["category"] != "코딩":
+            visible_text = ((state.get("inspection") or {}).get("observations") or {}).get("visibleText")
+            fact_claims, fact_skipped = fact_verification.candidates(visible_text or effective_content)
         links = {"items": [], "skippedCount": 0}
-        if bot_row:
+        if bot_row or (fact_claims and fact_search_enabled):
             link_started = time.monotonic()
             links = check_answer_links(self.db_path, effective_content)
             add_web_sources(state, questions, links)
             link_ms = round((time.monotonic() - link_started) * 1000)
+        if fact_claims:
+            state["claims"] = fact_claims
+            questions.update(fact_verification.questions(fact_claims, state["sources"]))
+        if bot_row:
             bot_evaluation.add_questions(state, questions, bot_row["instructions"],
                                          case["test_type"], case["expected_behavior"], case["check_focus"],
                                          case["title"], case["input_example"], artifact_summary)
@@ -898,7 +939,18 @@ class AppHandler(SimpleHTTPRequestHandler):
                     if isinstance(value, (int, float)):
                         result.setdefault("usage", {})[key] = result.get("usage", {}).get(key, 0) + value
         jev_ms = round((time.monotonic() - jev_started) * 1000)
-        report = rubric.parse_result(result, state, questions)
+        jev_retry_count = 0
+        try:
+            report = rubric.parse_result(result, state, questions)
+        except RuntimeError as error:
+            if bot_row or "JEV Score와 단계별 확률 불일치" not in str(error):
+                raise
+            retry_started = time.monotonic()
+            result = call_jev(state, self.evaluator_model, questions)
+            jev_ms += round((time.monotonic() - retry_started) * 1000)
+            report = rubric.parse_result(result, state, questions)
+            jev_retry_count = 1
+        report["jevRetryCount"] = jev_retry_count
         if full_inspection is not None:
             report["inspection"] = full_inspection
         if bot_row:
@@ -916,6 +968,87 @@ class AppHandler(SimpleHTTPRequestHandler):
             report["linkVerification"] = links
             bot_evaluation.apply_discrete_quality(result, state, report)
             report["rubricVersion"] = bot_evaluation.QUALITY_VERSION
+        elif fact_claims:
+            claims, skipped = fact_claims, fact_skipped
+            if claims:
+                report["linkVerification"] = links
+                fact_state = {"user_prompt": case["prompt"], "conversation_history": case["conversation_history"],
+                              "claims": claims, "sources": dict(state["sources"]),
+                              "source_metadata": dict(state["source_metadata"]),
+                              "verification_scope": state["verification_scope"]}
+                local_raw = result
+                rows = fact_verification.parse(local_raw, claims, fact_state["sources"])
+                if case["category"] == "추론·문제해결":
+                    fact_verification.apply_exact_numeric_reference(
+                        rows, spec["expectedAnswer"], fact_state["sources"], fact_state["source_metadata"])
+                added, attempts = {}, []
+                if fact_search_enabled:
+                    search_started = time.monotonic()
+                    added, attempts = fact_verification.retrieve(rows, fact_state["sources"], fact_state["source_metadata"])
+                    search_ms = round((time.monotonic() - search_started) * 1000)
+                if added:
+                    fact_state["sources"].update(added)
+                    unresolved = {row["id"]: row["text"] for row in rows
+                                  if row["importance"] == "HIGH" and row["relation"] == "UNVERIFIED"}
+                    if unresolved:
+                        searched_jev_started = time.monotonic()
+                        searched_raw = call_jev(fact_state, self.evaluator_model,
+                                                fact_verification.questions(unresolved, fact_state["sources"]))
+                        jev_ms += round((time.monotonic() - searched_jev_started) * 1000)
+                        revised = {row["id"]: row for row in fact_verification.parse(
+                            searched_raw, unresolved, fact_state["sources"])}
+                        rows = [revised.get(row["id"], row) for row in rows]
+                    result["factSearchEvaluation"] = searched_raw if unresolved else None
+                fact_report = fact_verification.score(rows, skipped, attempts,
+                                                       search_enabled=fact_search_enabled)
+                report["factVerification"] = fact_report
+                report["sourceMetadata"].update(fact_state["source_metadata"])
+                axis = report["axes"]["truthfulness"]
+                axis.update({"score": fact_report["score"], "status": fact_report["status"],
+                             "dominantLevel": fact_report["score"], "confidence": None,
+                             "probabilities": None, "scoringMethod": "confirmed_claim_contradictions",
+                             "description": ("근거와 모순으로 판정된 주장의 개수와 중요도로 계산한 점수입니다. 미검증 주장은 감점하지 않습니다."
+                                             if fact_report["status"] == "rated" else
+                                             "검사 상한 밖 후보 또는 낮은 확신도의 비사실 판정이 있어 사실 주장 여부를 확정하지 못했습니다."
+                                             if fact_report["status"] == "unverifiable" else
+                                             "검증 가능한 사실 주장이 없습니다."),
+                             "needsReview": fact_report["needsReview"]})
+                first_evidence = next((row for row in rows if row["relation"] == "CONTRADICTED"),
+                                      next((row for row in rows if row["sourceRef"] != "NONE"), None))
+                axis.update({"answerRef": first_evidence["id"] if first_evidence else "NONE",
+                             "answerText": first_evidence["text"] if first_evidence else None,
+                             "sourceRef": first_evidence["sourceRef"] if first_evidence else "NONE",
+                             "sourceText": first_evidence["sourceText"] if first_evidence else None,
+                             "notes": ((["미검증 주장은 감점하지 않았습니다."] if fact_report["unverifiedCount"] else []) +
+                                       ([f"근거 대조 판정의 선택 확신도가 낮거나 없는 주장 {fact_report['lowConfidenceVerifiedCount']}개는 점수를 유지하고 검토 필요로 표시했습니다."]
+                                        if fact_report["lowConfidenceVerifiedCount"] else []))})
+                report["issues"] = [issue for issue in report["issues"]
+                                    if issue != "일부 축에 근거 부족 또는 검토 필요"]
+                if any(item["needsReview"] for item in report["axes"].values()):
+                    report["issues"].append("일부 축에 근거 부족 또는 검토 필요")
+                report["needsReview"] = bool(report["issues"])
+        elif not bot_row and case["category"] != "코딩":
+            # A nonempty answer with no extractable span is not evidence that it has no facts.
+            unextracted = bool(effective_content.strip())
+            fact_report = fact_verification.score([], fact_skipped, [],
+                                                   search_enabled=fact_search_enabled)
+            fact_report["status"] = "unverifiable" if unextracted else "not_applicable"
+            fact_report["needsReview"] = unextracted
+            fact_report["extractionIssue"] = ("답변에서 대조할 주장 위치를 추출하지 못했습니다."
+                                               if unextracted else None)
+            report["factVerification"] = fact_report
+            report["axes"]["truthfulness"].update({
+                "score": None, "status": fact_report["status"], "dominantLevel": None,
+                "confidence": None, "probabilities": None,
+                "scoringMethod": "confirmed_claim_contradictions",
+                "description": fact_report["extractionIssue"] or "대조할 사실 주장이 없습니다.",
+                "answerRef": "NONE", "answerText": None, "sourceRef": "NONE",
+                "sourceText": None, "notes": [], "needsReview": unextracted})
+            report["issues"] = [issue for issue in report["issues"]
+                                if issue != "일부 축에 근거 부족 또는 검토 필요"]
+            if any(item["needsReview"] for item in report["axes"].values()):
+                report["issues"].append("일부 축에 근거 부족 또는 검토 필요")
+            report["needsReview"] = bool(report["issues"])
         report["settingsHash"] = settings_digest(case, spec)
         report["artifactSha256"] = artifact["sha256"] if artifact else None
         report["generatedArtifact"] = artifact_summary
@@ -926,7 +1059,8 @@ class AppHandler(SimpleHTTPRequestHandler):
             report["needsReview"] = True
         report["evaluatorModel"] = str(result.get("model", self.evaluator_model))
         report["requestedEvaluatorModel"] = self.evaluator_model
-        report["timings"] = {"htmlInspectionMs": html_ms, "linkCheckMs": link_ms, "jevMs": jev_ms,
+        report["timings"] = {"htmlInspectionMs": html_ms, "linkCheckMs": link_ms,
+                             "webSearchMs": search_ms, "jevMs": jev_ms,
                              "totalMs": round((time.monotonic() - started) * 1000)}
         scores = {key: value["score"] for key, value in report["axes"].items()}
         raw = {"rubric_version": report["rubricVersion"], "report": report, "quality": result,
@@ -993,7 +1127,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             raise ValueError("Bot 필터가 올바르지 않습니다.")
         with connect(self.db_path) as db:
             rows = db.execute("""
-                SELECT c.id AS case_id, c.title, c.category, c.prompt, c.evaluation_spec_json,
+                SELECT c.id AS case_id, c.title, c.category, c.prompt, c.attachment_text, c.evaluation_spec_json,
                        c.evaluation_mode, c.bot_id, c.bot_version, c.test_type, c.expected_behavior,
                        c.check_focus, c.input_example, bv.name AS bot_name,
                        b.current_version AS bot_current_version, bv.instructions AS bot_instructions,
@@ -1037,6 +1171,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                         {"sha256": row["artifact_sha256"], "filename": row["artifact_filename"]}
                         if row["artifact_sha256"] else None, spec, self.evaluator_model):
                     stale_reasons.append("평가 입력 변경")
+                if mode == "model" and web_evidence_expired(report, row["evaluated_at"]):
+                    stale_reasons.append("웹 근거 확인 시점 만료")
             artifact_summary = ({"filename": row["artifact_filename"], "format": row["artifact_format"],
                                  "size": row["artifact_size"], "sha256": row["artifact_sha256"],
                                  "textTruncated": bool(row["artifact_text_truncated"]),
@@ -1074,7 +1210,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                   "artifact_filename", "artifact_format", "artifact_size", "artifact_sha256", "artifact_text_truncated",
                   "score_type", "evaluator_model", "evaluated_at", "stale", "needs_review", "input_hash"]
         fields += [field for key in rubric.LABELS for field in (key, key + "_status", key + "_confidence")]
-        fields += ["quality_violations_json", "quality_pending_json", "link_verification_json",
+        fields += ["truthfulness_claims_json", "truthfulness_verified_count", "truthfulness_unverified_count",
+                   "truthfulness_scoring_method", "quality_violations_json", "quality_pending_json", "link_verification_json",
                    "report_json", "legacy_scores_json"]
         writer = csv.DictWriter(output, fieldnames=fields)
         writer.writeheader()
@@ -1100,6 +1237,10 @@ class AppHandler(SimpleHTTPRequestHandler):
                    "evaluator_model": item["evaluatorModel"], "evaluated_at": item["evaluatedAt"],
                    "stale": item["stale"], "needs_review": report.get("needsReview"), "input_hash": report.get("inputHash"),
                    "quality_violations_json": json.dumps({key: axis.get("violations", []) for key, axis in report.get("axes", {}).items()}, ensure_ascii=False),
+                   "truthfulness_claims_json": json.dumps((report.get("factVerification") or {}).get("claims", []), ensure_ascii=False),
+                   "truthfulness_verified_count": (report.get("factVerification") or {}).get("verifiedCount"),
+                   "truthfulness_unverified_count": (report.get("factVerification") or {}).get("unverifiedCount"),
+                   "truthfulness_scoring_method": (report.get("axes", {}).get("truthfulness") or {}).get("scoringMethod"),
                    "quality_pending_json": json.dumps({key: axis.get("pendingReasons", []) for key, axis in report.get("axes", {}).items()}, ensure_ascii=False),
                    "link_verification_json": json.dumps(report.get("linkVerification", {}), ensure_ascii=False),
                    "report_json": json.dumps(report, ensure_ascii=False),

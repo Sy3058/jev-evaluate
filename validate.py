@@ -2,13 +2,16 @@
 import argparse
 import json
 import math
+import tempfile
 from collections import defaultdict
+from contextlib import nullcontext
 from pathlib import Path
 
 import evaluation as rubric
+import fact_verification
 from rendering import inspect_html
 from code_runner import run_python
-from server import call_jev, html_inspection, load_env_file, now_iso
+from server import AppHandler, MODELS, connect, html_inspection, init_db, load_env_file, now_iso
 
 ROOT = Path(__file__).resolve().parent
 
@@ -29,6 +32,9 @@ def metrics(runs, labels):
     repeat_scores=defaultdict(list)
     # Use first run only for human agreement, avoiding pseudoreplication.
     seen=set()
+    fact_pairs=[]
+    missed_extractions=0
+    fact_case_outcomes={'caught':[], 'reviewFlagged':[], 'falseClearPass':[], 'abstained':[]}
     for run in runs:
         if 'report' not in run:
             continue
@@ -41,6 +47,33 @@ def metrics(runs, labels):
         if not run.get('caseHash') or gold[run['id']].get('caseHash') != run['caseHash']:
             continue
         seen.add(run['id'])
+        missing=gold[run['id']].get('missingClaims',[])
+        missing_relations=[]
+        if isinstance(missing,list):
+            for entry in missing:
+                if isinstance(entry,str):
+                    entry={'text':entry}
+                if not isinstance(entry,dict) or not isinstance(entry.get('text'),str) or not entry['text'].strip():
+                    continue
+                missed_extractions+=1
+                if entry.get('relation') in {'SUPPORTED','CONTRADICTED','UNVERIFIED','NOT_APPLICABLE'}:
+                    missing_relations.append(entry['relation'])
+                    fact_pairs.append((entry['relation'],None))
+        observed_claims={item['id']:item for item in (run['report'].get('factVerification') or {}).get('claims',[])}
+        human_contradiction='CONTRADICTED' in missing_relations
+        for claim_id,expected in gold[run['id']].get('claims',{}).items():
+            if not isinstance(expected,dict) or expected.get('relation') not in {
+                    'SUPPORTED','CONTRADICTED','UNVERIFIED','NOT_APPLICABLE'}:
+                continue
+            observed=observed_claims.get(claim_id)
+            fact_pairs.append((expected['relation'],observed.get('relation') if observed else None))
+            human_contradiction |= expected['relation']=='CONTRADICTED'
+        if human_contradiction:
+            truth=run['report']['axes']['truthfulness']
+            score=truth['score']
+            outcome=('abstained' if score is None else 'caught' if score<3 else
+                     'reviewFlagged' if run['report'].get('needsReview') else 'falseClearPass')
+            fact_case_outcomes[outcome].append(run['id'])
         for axis,expected in gold[run['id']].get('axes',{}).items():
             if axis in rubric.LABELS and type(expected) is int and 0<=expected<=3:
                 item=run['report']['axes'][axis]
@@ -63,7 +96,26 @@ def metrics(runs, labels):
     repeat_agreement=stable/len(repeat_pairs) if repeat_pairs else None
     score_ranges=[round(max(values)-min(values),4) for values in repeat_scores.values()
                   if len(values)>=3 and all(v is not None for v in values)]
+    fact_total=len(fact_pairs)
+    contradiction_total=sum(gold_relation=='CONTRADICTED' for gold_relation,_ in fact_pairs)
+    contradiction_found=sum(gold_relation=='CONTRADICTED' and predicted=='CONTRADICTED'
+                            for gold_relation,predicted in fact_pairs)
+    false_contradictions=sum(gold_relation!='CONTRADICTED' and predicted=='CONTRADICTED'
+                             for gold_relation,predicted in fact_pairs)
     return {'groups':groups,'humanLabeledHoldoutCases':len(seen),
+            'factClaims':{'n':fact_total,
+                          'humanMissingClaims':missed_extractions,
+                          'relationAgreement':sum(a==b for a,b in fact_pairs)/fact_total if fact_total else None,
+                          'contradictionRecall':contradiction_found/contradiction_total if contradiction_total else None,
+                          'missedContradictions':contradiction_total-contradiction_found,
+                          'falseContradictions':false_contradictions,
+                          'unverifiedCount':sum(predicted=='UNVERIFIED' for _,predicted in fact_pairs),
+                          'casesWithHumanContradiction':sum(len(ids) for ids in fact_case_outcomes.values()),
+                          'falseClearPasses':len(fact_case_outcomes['falseClearPass']),
+                          'falseClearPassRate':(len(fact_case_outcomes['falseClearPass']) /
+                                                sum(len(ids) for ids in fact_case_outcomes.values())
+                                                if any(fact_case_outcomes.values()) else None),
+                          'caseOutcomes':fact_case_outcomes},
             'repeatGroups':len(repeat_pairs),'repeatAgreement':repeat_agreement,
             'repeatScoreRangeMean':sum(score_ranges)/len(score_ranges) if score_ranges else None,
             'repeatScoreRangeMax':max(score_ranges) if score_ranges else None,
@@ -101,7 +153,19 @@ def main():
     output={'rubricVersion':rubric.VERSION,'fixtureHash':rubric.digest(cases),'model':args.model,
             'live':args.live,'createdAt':now_iso(),'fixtureProvenance':'AI-authored synthetic probes, not independent human labels','runs':runs}
     args.output.parent.mkdir(parents=True,exist_ok=True)
-    template=[{'id':c['id'],'caseHash':rubric.digest(c),'reviewer':'','humanReviewed':False,'axes':{a:None for a in rubric.LABELS}} for c in cases]
+    template=[]
+    for c in cases:
+        item={'id':c['id'],'caseHash':rubric.digest(c),'reviewer':'','humanReviewed':False,
+              'axes':{a:None for a in rubric.LABELS}}
+        if c['category']!='코딩':
+            claim_text=c['response']
+            if c.get('outputFormat')=='html':
+                rendered=inspect_html(c['response'],ROOT/'data/artifacts')
+                claim_text=(rendered.get('observations') or {}).get('visibleText') or claim_text
+            claims,_=fact_verification.candidates(claim_text)
+            item['claims']={cid:{'text':claim,'relation':None,'importance':None} for cid,claim in claims.items()}
+            item['missingClaims']=[]
+        template.append(item)
     template_path=args.output.parent/f'{args.cases.stem}.human-labels.template.json'
     if not template_path.exists(): template_path.write_text(json.dumps(template,ensure_ascii=False,indent=2),encoding='utf-8')
     for c in selected:
@@ -109,28 +173,48 @@ def main():
             'expectedAnswer':c.get('expectedAnswer',''),'checks':c.get('checks',[]),'codeTests':c.get('codeTests',{})},c['prompt'])
         case={'category':c['category'],'prompt':c['prompt'],'attachment_text':c.get('attachment',''),
               'conversation_history':'','evaluation_spec_json':json.dumps(spec,ensure_ascii=False)}
-        inspection=None
-        if spec['outputFormat']=='html':
-            inspection=html_inspection(c['response']); inspection.update(inspect_html(c['response'],ROOT/'data/artifacts'))
-        execution=run_python(rubric.python_source(c['response']),spec['codeTests']) if spec['codeTests'] else None
-        state,questions=rubric.prepare(case,{'content':c['response']},inspection,execution)
-        for repeat in range(args.repeats if args.live else 1):
-            run={'id':c['id'],'category':c['category'],'split':c['split'],'repeat':repeat+1,
-                 'inputHash':rubric.digest(state),'caseHash':rubric.digest(c),'checks':state['checks']}
+        context=tempfile.TemporaryDirectory() if args.live else nullcontext(None)
+        with context as temporary:
             if args.live:
-                try:
-                    raw=call_jev(state,args.model,questions)
-                    run['report']=rubric.parse_result(raw,state,questions)
-                    run['raw']=raw
-                except (RuntimeError,ValueError) as error:
-                    run['error']=str(error)
-            runs.append(run)
-            output['metrics']=metrics(runs,labels)
-            args.output.write_text(json.dumps(output,ensure_ascii=False,indent=2),encoding='utf-8')
-            print(json.dumps({'id':c['id'],'repeat':repeat+1,'error':run.get('error'),
-                'axes':{k:v['score'] for k,v in run.get('report',{}).get('axes',{}).items()}},ensure_ascii=True),flush=True)
-            if 'error' in run:
-                raise SystemExit(1)
+                handler=object.__new__(AppHandler)
+                handler.db_path=Path(temporary)/'validation.db'
+                handler.evaluator_model=args.model
+                init_db(handler.db_path)
+                created=handler.create_case({'title':c['id'],'category':c['category'],'prompt':c['prompt'],
+                    'attachmentText':c.get('attachment',''),'responses':{MODELS[0]:c['response']},
+                    'evaluationSpec':spec})
+                response_id=created['responses'][0]['id']
+            else:
+                inspection=None
+                if spec['outputFormat']=='html':
+                    inspection=html_inspection(c['response']); inspection.update(inspect_html(c['response'],ROOT/'data/artifacts'))
+                execution=run_python(rubric.python_source(c['response']),spec['codeTests']) if spec['codeTests'] else None
+                state,questions=rubric.prepare(case,{'content':c['response']},inspection,execution)
+            for repeat in range(args.repeats if args.live else 1):
+                run={'id':c['id'],'category':c['category'],'split':c['split'],'repeat':repeat+1,
+                     'caseHash':rubric.digest(c)}
+                if args.live:
+                    try:
+                        evaluated=handler.evaluate(response_id,force=repeat>0)
+                        run['report']=evaluated['report']
+                        run['inputHash']=evaluated['report']['inputHash']
+                        run['checks']=evaluated['report']['checks']
+                        with connect(handler.db_path) as db:
+                            saved=db.execute('SELECT raw_json FROM evaluations WHERE id = ?',
+                                             (evaluated['id'],)).fetchone()
+                        run['raw']=json.loads(saved['raw_json'])['quality']
+                    except (RuntimeError,ValueError) as error:
+                        run['error']=str(error)
+                else:
+                    run['inputHash']=rubric.digest(state)
+                    run['checks']=state['checks']
+                runs.append(run)
+                output['metrics']=metrics(runs,labels)
+                args.output.write_text(json.dumps(output,ensure_ascii=False,indent=2),encoding='utf-8')
+                print(json.dumps({'id':c['id'],'repeat':repeat+1,'error':run.get('error'),
+                    'axes':{k:v['score'] for k,v in run.get('report',{}).get('axes',{}).items()}},ensure_ascii=True),flush=True)
+                if 'error' in run:
+                    raise SystemExit(1)
     print('Saved '+str(args.output),flush=True)
 
 

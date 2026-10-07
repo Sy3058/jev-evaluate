@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-VERSION = "five-axis-v3-score"
+BASE_VERSION = "five-axis-v3-score"
+VERSION = "five-axis-v14-direct-evidence"
 CATEGORIES = ["코딩", "강의·첨부자료", "일반지식·설명", "추론·문제해결"]
 LABELS = {
     "instruction_following": "Instruction Following",

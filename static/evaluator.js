@@ -54,7 +54,7 @@ function fillSpec(prefix,spec) {
   $(`#${prefix}-checks`).value=JSON.stringify(spec.checks || [],null,2);
   $(`#${prefix}-code-tests`).value=JSON.stringify(spec.codeTests || {},null,2);
 }
-function axisCell(axis, scoreType) { return !axis ? '—' : axis.score === null ? esc(statusNames[axis.status]) : `${scoreType === 'expected_level_0_3' ? Number(axis.score).toFixed(2) : axis.score} / 3${scoreType === 'violation_count_0_3' && axis.needsReview ? ' · 검토 필요' : ''}`; }
+function axisCell(axis, scoreType) { return !axis ? '—' : axis.score === null ? esc(statusNames[axis.status]) : `${scoreType === 'expected_level_0_3' && axis.scoringMethod !== 'confirmed_claim_contradictions' ? Number(axis.score).toFixed(2) : axis.score} / 3${axis.needsReview && (scoreType === 'violation_count_0_3' || axis.scoringMethod === 'confirmed_claim_contradictions') ? ' · 검토 필요' : ''}`; }
 function issueEvidence(v) {
   if (v.requirementRef) return `<article class="issue-card linked-issue">
     <b>${esc(v.severity === 'major' ? '중대' : '경미')} · ${esc(v.label)}</b>
@@ -91,14 +91,29 @@ function qualityAxis(key, a, report) {
     ${a.notes?.filter(n=>!(a.pendingReasons || []).includes(n) && !(a.rejectedFindings || []).includes(n)).map(n=>`<p class="hint">${esc(n)}</p>`).join('') || ''}
   </details>`;
 }
+function modelQualityAxis(key, a, report, factDetails='') {
+  const open = (a.score !== null && a.score < 2.5) || a.needsReview;
+  const requirementDetails = key === 'instruction_following' && report.requirements?.length
+    ? `<div class="bot-rules">${report.requirements.map(r=>`<article class="claim-card"><b>${esc(r.id)} · ${esc(requirementNames[r.status] || r.status)}</b><p>${esc(r.text)}</p></article>`).join('')}</div>` : '';
+  return `<details class="quality-axis" ${open ? 'open' : ''}><summary><b>${esc(config.criteria[key])}: ${axisCell(a, report.scoreType)}</b><span>${esc(a.description)}</span></summary>
+    ${a.scoringMethod === 'confirmed_claim_contradictions' ? '<p class="hint">근거와 모순으로 판정된 주장의 개수와 중요도로 계산한 정수 점수입니다. 미검증 주장은 감점하지 않습니다. 선택 확신도가 낮은 판정은 검토 필요로 표시합니다.</p>' : `<p>JEV 확신도: ${typeof a.confidence === 'number' ? a.confidence.toFixed(2) : '미제공'} (정확도 보장 아님)</p>`}
+    ${report.scoreType === 'expected_level_0_3' && a.status === 'rated' && a.probabilities ? `<p>단계별 확률: ${[0,1,2,3].map(n=>`${n}점 ${((a.probabilities[String(n)] || 0)*100).toFixed(1)}%`).join(' · ')}</p><p class="hint">점수는 단계별 확률의 가중 평균입니다. 표시된 설명은 가장 가능성 높은 단계 기준입니다.</p>` : ''}
+    ${a.answerText ? `<div class="linked-evidence"><div><strong>답변 · ${esc(a.answerRef)}</strong><p>${esc(a.answerText)}</p></div>${a.sourceText ? `<div><strong>근거 · ${esc(a.sourceRef)}</strong><p>${esc(a.sourceText)}</p></div>` : ''}</div>` : a.sourceText ? `<p>근거 ${esc(a.sourceRef)}: ${esc(a.sourceText)}</p>` : ''}
+    ${a.notes?.map(n=>`<p class="hint">${esc(n)}</p>`).join('') || ''}${requirementDetails}${factDetails}
+  </details>`;
+}
 function reportDetails(report, botMode=false) {
   if (!report) return '';
-  const axes = report.scoreType === 'violation_count_0_3' ? Object.entries(report.axes).map(([key,a])=>qualityAxis(key,a,report)).join('') : Object.entries(report.axes).map(([key,a])=>`<article class="claim-card"><b>${esc(config.criteria[key])}: ${axisCell(a, report.scoreType)}</b><p>${esc(a.description)}</p>
-    <p>JEV 확신도: ${typeof a.confidence === 'number' ? a.confidence.toFixed(2) : '미제공'} (정확도 보장 아님)</p>
-    ${report.scoreType === 'expected_level_0_3' && a.status === 'rated' && a.probabilities ? `<p>단계별 확률: ${[0,1,2,3].map(n=>`${n}점 ${((a.probabilities[String(n)] || 0)*100).toFixed(1)}%`).join(' · ')}</p><p class="hint">점수는 단계별 확률의 가중 평균입니다. 표시된 설명은 가장 가능성 높은 단계 기준입니다.</p>` : ''}
-    ${report.scoreType !== 'violation_count_0_3' && a.answerText ? `<p>답변 ${esc(a.answerRef)}: ${esc(a.answerText)}</p>` : ''}
-    ${report.scoreType !== 'violation_count_0_3' && a.sourceText ? `<p>근거 ${esc(a.sourceRef)}: ${esc(a.sourceText)}</p>` : ''}
-    ${a.notes.map(n=>`<p class="hint">${esc(n)}</p>`).join('')}</article>`).join('');
+  const fact = report.factVerification;
+  const factNames = {SUPPORTED:'근거와 일치',CONTRADICTED:'근거와 모순',UNVERIFIED:'미검증',NOT_APPLICABLE:'사실 주장 아님'};
+  const factDetails = fact ? `<section class="claim-card"><b>Truthfulness 근거 대조 · ${fact.score === null ? esc(statusNames[fact.status] || '판정 불가') : `${fact.score} / 3점`}</b>
+    <p>추출된 사실 주장 ${fact.claimCount}개 중 ${fact.verifiedCount}개 대조 · 미검증 ${fact.unverifiedCount}개${fact.lowConfidenceVerifiedCount ? ` · 선택 확신도 낮거나 없는 근거 대조 ${fact.lowConfidenceVerifiedCount}개` : ''}${!fact.claimCount && fact.lowConfidenceExcludedCount ? ` · 사실 주장 아님 판정의 확신도 낮음 ${fact.lowConfidenceExcludedCount}개` : ''}${fact.unsearchedHighCount ? ` · 검색하지 못한 핵심 주장 ${fact.unsearchedHighCount}개` : ''}${fact.skippedCandidateCount ? ` · 답변 전체에서 고르게 추린 뒤 검사 상한 밖에 남은 후보 ${fact.skippedCandidateCount}개` : ''}${fact.needsReview ? ' · 검토 필요' : ''}</p>
+    ${fact.extractionIssue ? `<p class="issue-warning">${esc(fact.extractionIssue)}</p>` : ''}
+    <p class="hint">점수는 근거와 모순으로 판정된 주장의 개수와 중요도로 계산합니다. 미검증 주장은 감점하지 않으며, 3점은 모든 사실이 확인됐다는 뜻이 아닙니다.</p>
+    ${fact.claims.map(c=>`<article class="claim-card"><b>${esc(c.id)} · ${esc(factNames[c.relation] || c.relation)}${c.importance === 'HIGH' ? ' · 핵심' : ''}${c.lowConfidenceFields?.length ? ' · 판정 검토 필요' : ''}</b><p>${esc(c.text)}</p>${c.sourceRef !== 'NONE' ? `<p>근거 ${esc(c.sourceRef)}: ${esc(c.sourceText || '')}</p>` : ''}${c.relation !== 'NOT_APPLICABLE' ? `<p class="hint">JEV 선택 확신도 · 중요도 ${typeof c.importanceConfidence === 'number' ? c.importanceConfidence.toFixed(2) : '미제공'} · 관계 ${typeof c.relationConfidence === 'number' ? c.relationConfidence.toFixed(2) : '미제공'} · 근거 ${typeof c.sourceConfidence === 'number' ? c.sourceConfidence.toFixed(2) : '미제공'}</p>` : ''}${c.verificationMethod === 'exact_numeric_reference' ? '<p class="hint">등록된 기준 답안과 숫자를 직접 비교했습니다.</p>' : ''}</article>`).join('')}
+    ${fact.searchAttempts.length ? `<p class="hint">웹 검색: ${fact.searchAttempts.map(a=>`${esc(a.claimId)} ${esc(a.status)}`).join(' · ')} · 검색 출처의 적합성과 신뢰성은 사람 검토가 필요합니다.</p>` : ''}</section>` : '';
+  const axes = Object.entries(report.axes).map(([key,a])=>report.scoreType === 'violation_count_0_3'
+    ? qualityAxis(key,a,report) : modelQualityAxis(key,a,report,key === 'truthfulness' ? factDetails : '')).join('');
   const requirements = report.requirements.map(r=>`<li>${esc(r.id)} ${esc(r.text)} — ${esc(requirementNames[r.status])}</li>`).join('');
   const checks = report.checks.map(c=>`<li>${esc(c.kind)}: ${c.passed?'통과':'실패'} ${esc(c.detail)}</li>`).join('');
   const render = report.inspection;
@@ -110,10 +125,10 @@ function reportDetails(report, botMode=false) {
   const groundingNames = {NONE:'확인된 자료 불일치 없음',MISQUOTE:'원문과 다른 인용',INVENTED_EVENT:'자료에 없는 사실',WRONG_ATTRIBUTION:'귀속·시간 오류',OUTSIDE_SOURCE:'자료 밖 사실 사용',UNKNOWN:'대조 보류'};
   const lengthNames = {NONE:'확인된 분량 문제 없음',REPETITION:'본문 반복',IRRELEVANT:'무관한 설명',OVERCOMPRESSED:'과도한 압축',UNKNOWN:'본문 확인 불가'};
   const botEvidence = botMode ? `${report.groundingIssue ? `<p>자료 대조: ${esc(groundingNames[report.groundingIssue] || report.groundingIssue)} · 원문 일치 인용 ${report.quoteObservations?.exactMatches?.length || 0}건 · 확인 필요 인용 ${report.quoteObservations?.unmatchedQuotes?.length || 0}건</p>` : ''}${report.responseLengthIssue ? `<p>본문 분량: ${esc(lengthNames[report.responseLengthIssue] || report.responseLengthIssue)}</p>` : ''}` : '';
-  const overview = report.scoreType === 'violation_count_0_3' ? `<div class="quality-overview">${axes}</div>` : '';
-  return `${overview}<details><summary>${overview ? '검사·원본 기록 보기' : '판정·근거·검사 보기'}</summary><p>평가 신뢰성: 미검증 · 종합 순위 미산출 · ${report.scoreType === 'expected_level_0_3' ? 'Score 확률 가중 평균' : report.scoreType === 'violation_count_0_3' ? '확인된 위반 개수·심각도에 따른 정수 점수' : '기존 단계 선택'}</p>${report.issues.map(s=>`<p>${esc(s)}</p>`).join('')}
-    ${botEvidence}${links ? `<details><summary>답변 인용 링크 확인 · ${linkItems.filter(item=>item.status === 'verified').length}/${linkItems.length}개 본문 확인</summary><p class="hint">링크 접속과 본문 존재는 주장 정확성 또는 실제 검색 도구 사용의 증거가 아닙니다.</p><ul>${links}</ul>${report.linkVerification.skippedCount ? `<p>검사 상한으로 ${esc(report.linkVerification.skippedCount)}개 링크를 확인하지 않았습니다.</p>` : ''}</details>` : ''}${!botMode && requirements ? `<ul>${requirements}</ul>` : ''}${checks ? `<ul>${checks}</ul>` : ''}${sources ? `<details><summary>등록 근거 목록</summary><ul>${sources}</ul></details>` : ''}${render ? `<p>HTML 렌더링: ${render.rendered?'관측 완료':'미완료'} ${esc(render.reason || render.limitation || '')} ${screenshot}</p>` : ''}
-    ${report.executionDetails ? `<p>코드 실행: ${esc(report.executionDetails.status)} ${esc(report.executionDetails.reason || report.executionDetails.scope || '')}</p>` : ''}${overview ? '' : `<div class="claim-list">${axes}</div>`}<p>입력 해시: ${esc(report.inputHash)}</p></details>`;
+  const overview = `<div class="quality-overview">${axes}</div>`;
+  return `${overview}<details><summary>검사·원본 기록 보기</summary><p>평가 신뢰성: 미검증 · 종합 순위 미산출 · ${report.scoreType === 'expected_level_0_3' ? '대부분의 축은 Score 확률 가중 평균' : report.scoreType === 'violation_count_0_3' ? '확인된 위반 개수·심각도에 따른 정수 점수' : '기존 단계 선택'}${fact ? ' · Truthfulness는 확인된 주장 모순 기준 정수 점수' : ''}</p>${report.jevRetryCount ? `<p class="hint">JEV 점수·확률 불일치로 ${esc(report.jevRetryCount)}회 재요청했습니다.</p>` : ''}${report.issues.map(s=>`<p>${esc(s)}</p>`).join('')}
+    ${botEvidence}${botMode ? factDetails : ''}${links ? `<details><summary>답변 인용 링크 확인 · ${linkItems.filter(item=>item.status === 'verified').length}/${linkItems.length}개 본문 확인</summary><p class="hint">링크 접속과 본문 존재는 주장 정확성 또는 실제 검색 도구 사용의 증거가 아닙니다.</p><ul>${links}</ul>${report.linkVerification.skippedCount ? `<p>검사 상한으로 ${esc(report.linkVerification.skippedCount)}개 링크를 확인하지 않았습니다.</p>` : ''}</details>` : ''}${!botMode && requirements ? `<ul>${requirements}</ul>` : ''}${checks ? `<ul>${checks}</ul>` : ''}${sources ? `<details><summary>등록 근거 목록</summary><ul>${sources}</ul></details>` : ''}${render ? `<p>HTML 렌더링: ${render.rendered?'관측 완료':'미완료'} ${esc(render.reason || render.limitation || '')} ${screenshot}</p>` : ''}
+    ${report.executionDetails ? `<p>코드 실행: ${esc(report.executionDetails.status)} ${esc(report.executionDetails.reason || report.executionDetails.scope || '')}</p>` : ''}<p>입력 해시: ${esc(report.inputHash)}</p></details>`;
 }
 function botDetails(assessment) {
   if (!assessment) return '';
@@ -126,8 +141,11 @@ function resultStatus(i) {
   if (i.needsReclassification) return '유형 재분류 필요';
   if (i.stale) return '재평가 필요';
   if (mode === 'ai_bot' && i.report?.botAssessment) {
-    if (i.report.botAssessment.status === 'review' && i.report.botAssessment.expectedResult?.verdict === 'COMPLIANT') return '기대 결과 충족 · 지침 검토 필요';
-    return ({violation:'지침 위반 있음',expectation_mismatch:'기대 결과 미충족',review:'사람 검토 필요',compliant:'지침·기대 결과 충족'})[i.report.botAssessment.status];
+    const assessment = i.report.botAssessment;
+    const label = assessment.status === 'review' && assessment.expectedResult?.verdict === 'COMPLIANT'
+      ? '기대 결과 충족 · 지침 검토 필요'
+      : ({violation:'지침 위반 있음',expectation_mismatch:'기대 결과 미충족',review:'사람 검토 필요',compliant:'지침·기대 결과 충족'})[assessment.status] || '판정 확인 필요';
+    return i.report.needsReview && assessment.status !== 'review' ? `${label} · 검토 필요` : label;
   }
   if (i.report) return i.report.needsReview ? '검토 필요' : '판정 완료 · 신뢰성 미검증';
   return i.scores ? '구버전 결과' : '미평가';
@@ -161,8 +179,8 @@ function render() {
         <tr class="model-evidence"><td colspan="8"><small>${esc(i.rubricVersion || config.rubricVersion)} / ${esc(i.evaluatorModel || '')}</small>
         ${i.artifact ? `<p>생성 파일: <a href="${esc(i.artifact.downloadUrl)}">${esc(i.artifact.filename)}</a> · ${esc(i.artifact.format.toUpperCase())} · ${Math.ceil(i.artifact.size/1024)}KB${i.artifact.textTruncated ? ' · 내용 일부만 추출' : ''}${i.artifact.extractionNote ? ` · ${esc(i.artifact.extractionNote)}` : ''}</p>` : '<p>생성 파일 없음</p>'}
         ${mode === 'ai_bot' && i.report?.botAssessment?.expectedResult ? `<p><b>테스트 기대 결과: ${esc(i.report.botAssessment.expectedResult.label)}</b> · JEV 확신도 ${typeof i.report.botAssessment.expectedResult.confidence === 'number' ? i.report.botAssessment.expectedResult.confidence.toFixed(2) : '미제공'}${i.artifact ? ' · 생성 파일 업로드·다운로드 확인' : ''}</p>` : ''}
-        ${i.report?.timings ? `<p class="hint">최근 평가 소요: 전체 ${(i.report.timings.totalMs/1000).toFixed(1)}초 · HTML 검사 ${(i.report.timings.htmlInspectionMs/1000).toFixed(1)}초${i.report.timings.linkCheckMs ? ` · 링크 ${(i.report.timings.linkCheckMs/1000).toFixed(1)}초` : ''} · JEV ${(i.report.timings.jevMs/1000).toFixed(1)}초</p>` : ''}
-        ${i.stale ? `<p class="risk">재평가 필요: ${esc((i.staleReasons || []).join(' · ') || '현재 기준과 다름')}</p>` : ''}${mode === 'ai_bot' && i.report ? '<p class="quality-heading">AI Bot 품질 분석 · IF는 Bot 지침과 케이스 기대 결과 기준</p>' : ''}${reportDetails(i.report, mode === 'ai_bot')}${botDetails(i.report?.botAssessment)}${i.scores&&!i.report?`<details><summary>기존 점수 (비교 제외)</summary><pre>${esc(JSON.stringify(i.scores,null,2))}</pre></details>`:''}</td></tr>`;
+        ${i.report?.timings ? `<p class="hint">최근 평가 소요: 전체 ${(i.report.timings.totalMs/1000).toFixed(1)}초 · HTML 검사 ${(i.report.timings.htmlInspectionMs/1000).toFixed(1)}초${i.report.timings.linkCheckMs ? ` · 링크 ${(i.report.timings.linkCheckMs/1000).toFixed(1)}초` : ''}${i.report.timings.webSearchMs ? ` · 웹 검색 ${(i.report.timings.webSearchMs/1000).toFixed(1)}초` : ''} · JEV ${(i.report.timings.jevMs/1000).toFixed(1)}초</p>` : ''}
+        ${i.stale ? `<p class="risk">재평가 필요: ${esc((i.staleReasons || []).join(' · ') || '현재 기준과 다름')}</p>` : ''}${i.report ? `<p class="quality-heading">${mode === 'ai_bot' ? 'AI Bot 품질 분석 · IF는 Bot 지침과 케이스 기대 결과 기준' : '모델 품질 분석 · IF는 사용자 요청과 등록 기준'}</p>` : ''}${reportDetails(i.report, mode === 'ai_bot')}${botDetails(i.report?.botAssessment)}${i.scores&&!i.report?`<details><summary>기존 점수 (비교 제외)</summary><pre>${esc(JSON.stringify(i.scores,null,2))}</pre></details>`:''}</td></tr>`;
     }).join('');
     return `<tr class="case-row"><td><button class="case-toggle" data-case-toggle="${caseId}" aria-expanded="${open}" aria-controls="case-details-${caseId}"><span class="case-chevron" aria-hidden="true">▸</span><strong>${esc(first.title)}</strong></button><p>${mode === 'ai_bot' ? `${esc(first.botName)} · 지침 v${first.botVersion} · ${first.testType === 'exception' ? '예외 테스트' : '정상 테스트'} · ` : ''}${esc(first.category)} · 답변 ${responses.length}개</p><small class="case-prompt">${esc(first.prompt)}</small></td>
       <td>${esc(status)}</td><td class="case-actions"><button data-evaluate-case="${caseId}">변경분 평가</button><button data-force-case="${caseId}">강제 전체 재평가</button><button data-settings="${caseId}">공통 설정</button>${mode === 'ai_bot' && first.botCurrentVersion > first.botVersion ? `<button data-update-bot-version="${caseId}">최신 지침 적용 (v${first.botCurrentVersion})</button>` : ''}</td></tr>
@@ -308,7 +326,7 @@ document.addEventListener('click', async event=>{
     }
     if (button.dataset.history) {
       const data=await api(`/api/responses/${button.dataset.history}/history`);
-      $('#history-content').innerHTML=data.items.map(i=>`<article><h3>${esc(i.createdAt)} · ${esc(i.rubricVersion)}</h3><p>${esc(i.model)}</p>${i.report?`${i.report.botInstructions ? `<details><summary>적용 지침 · ${esc(i.report.botName)} v${i.report.botVersion}</summary><pre>${esc(i.report.botInstructions)}</pre></details>` : ''}${i.report.botAssessment ? '<p class="quality-heading">AI Bot 품질 분석</p>' : ''}${reportDetails(i.report, !!i.report.botAssessment)}${botDetails(i.report.botAssessment)}`:`<pre>${esc(JSON.stringify(i.scores,null,2))}</pre>`}</article>`).join('') || '<p>평가 이력이 없습니다.</p>';
+      $('#history-content').innerHTML=data.items.map(i=>`<article><h3>${esc(i.createdAt)} · ${esc(i.rubricVersion)}</h3><p>${esc(i.model)}</p>${i.report?`${i.report.botInstructions ? `<details><summary>적용 지침 · ${esc(i.report.botName)} v${i.report.botVersion}</summary><pre>${esc(i.report.botInstructions)}</pre></details>` : ''}<p class="quality-heading">${i.report.botAssessment ? 'AI Bot 품질 분석' : '모델 품질 분석'}</p>${reportDetails(i.report, !!i.report.botAssessment)}${botDetails(i.report.botAssessment)}`:`<pre>${esc(JSON.stringify(i.scores,null,2))}</pre>`}</article>`).join('') || '<p>평가 이력이 없습니다.</p>';
       $('#history-dialog').showModal();
     }
   } catch(error) { notify(error.message); } finally { button.disabled=false; }

@@ -4,7 +4,7 @@
 지시사항 준수는 질문 유형이 아닌 모든 답변의 공통 평가 항목입니다.
 
 현재 상태: **사람 검토용 평가 보조 도구. 독립적인 신뢰성 검증은 미완료입니다.**
-진행 상태는 [평가기 구현 ledger](평가기_구현_LEDGER.md), [AI Bot 평가 ledger](AI_BOT_평가_LEDGER.md), [AI Bot 정수 평가 ledger](AI_BOT_정수평가_LEDGER.md)를 확인하세요. 모델 평가 기준은 [RUBRIC.md](RUBRIC.md)에 있습니다.
+진행 상태는 [평가기 구현 ledger](평가기_구현_LEDGER.md), [AI Bot 평가 ledger](AI_BOT_평가_LEDGER.md), [AI Bot 정수 평가 ledger](AI_BOT_정수평가_LEDGER.md)를 확인하세요. 모델 평가 기준은 [RUBRIC.md](RUBRIC.md)에 있습니다. 평가 기준의 버전별 변경 이유와 Git 기록 규칙은 [VERSION_HISTORY.md](VERSION_HISTORY.md)에 있습니다.
 
 ## 실행 (Windows PowerShell)
 
@@ -18,7 +18,7 @@ $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path (Get-Location) '.browsers'
 
 브라우저에서 http://127.0.0.1:8787 에 접속합니다. Python 3.12 이상이 필요합니다.
 AI Bot 평가의 전체 흐름과 JEV 연계를 보려면 [오프라인 프로젝트 설명 HTML](static/jev-project-guide.html)을 파일로 직접 열어 주세요. 서버와 API 키 없이 DB의 `탁월 평가 요청` 케이스·평가 이력을 발췌한 스냅샷을 재생합니다. 구현 근거는 [JEV 연계 구조](JEV_연계_구조.md)에 있습니다.
-`.env.example`을 참고해 `.env`에 TYPESAFE_API_KEY를 설정합니다. 키는 서버에서만 사용하며 화면/CSV에 내보내지 않습니다.
+`.env.example`을 참고해 `.env`에 TYPESAFE_API_KEY를 설정합니다. 키는 서버에서만 사용하며 화면/CSV에 내보내지 않습니다. JEV의 공개 API는 입력된 자료에 대한 판단을 반환하며 웹 검색 API는 제공하지 않습니다. 현재 앱의 자동 검색 구현은 선택적으로 Brave Search API를 사용하므로, 이를 사용하려면 `BRAVE_SEARCH_API_KEY`를 설정합니다. Brave는 JEV 평가의 필수 구성 요소가 아닙니다. 검색 키가 없거나 검색이 실패하면 등록 자료를 대조하고, 일반지식과 등록 근거가 없는 비코딩 대화에서는 답변에 인용된 확인 가능한 링크 본문도 대조합니다. 남은 주장은 미검증으로 표시합니다. 자동 검색을 사용할 때 검색 대상 주장 문자열은 Brave Search API로 전송됩니다. 다른 검색 서비스로 바꾸려면 검색 결과 URL을 반환하는 `fact_verification.py`의 `search()` 연결을 수정해야 합니다.
 기본 JEV 버전은 `jev-1.13.0`으로 고정합니다. `--model`로 변경할 수 있으며 반환된 실제 버전도 저장합니다.
 브라우저 의존성을 설치하지 않아도 텍스트 평가는 가능하지만 HTML 시각 평가가 판정 불가로 표시됩니다.
 
@@ -49,9 +49,9 @@ AI Bot 답변의 인용 URL은 평가할 때 최대 8개까지 공개 HTTPS 페�
 
 ## 점수의 의미
 
-모델 평가의 IF, Truthfulness, Response Length, Style & Clarity, Harmlessness/Safety는 각각 네 설명 단계(0~3)의 확률 가중 평균으로 표시합니다.
+모델 평가의 IF, Response Length, Style & Clarity, Harmlessness/Safety는 각각 네 설명 단계(0~3)의 확률 가중 평균으로 표시합니다. 비코딩 답변의 Truthfulness는 추출한 주장 중 확인된 모순을 기준으로 정수 점수를 표시하며, 코딩 답변은 기존 단계별 확률 방식과 코드 실행 검사를 사용합니다.
 예를 들어 2단계 40%, 3단계 60%면 `2×0.4+3×0.6=2.60/3`입니다. 같은 3단계가 최빈값이어도 확률 분포에 따라 점수가 달라집니다.
-상세 화면에는 단계별 확률을 보여 줍니다. 소수점 두 자리는 표시 방식이며 검증된 품질 정확도를 의미하지 않습니다. 3단계 확률이 100%라면 여전히 3.00/3입니다.
+결과 화면에서는 모델 평가와 AI Bot 평가 모두 다섯 품질 축을 펼칠 수 있는 카드로 보여 줍니다. 모델 점수 카드에는 단계별 확률·답변과 근거 위치 또는 주장별 대조 결과를 표시하고, AI Bot 카드에는 확인된 위반과 보류 이유를 표시합니다. 소수점 두 자리는 표시 방식이며 검증된 품질 정확도를 의미하지 않습니다. 3단계 확률이 100%라면 여전히 3.00/3입니다.
 모델 평가의 UNKNOWN(판정 불가), NA(해당 없음)는 점수가 없으며 평균에 0 또는 만점으로 넣지 않습니다.
 NA는 사실 주장이 없는 Truthfulness에 사용합니다. 무해한 답변의 Safety는 충족으로 판정합니다.
 모델 평가의 confidence는 JEV 판단의 확신도이며 품질 점수나 실제 정확도가 아닙니다.
@@ -99,9 +99,10 @@ Docker와 로컬 `python:3.12-slim` 이미지가 필요합니다. 앱은 이미�
 ## 검증 범위와 제한
 
 - 코딩: Python 구문 검사와 기준 답안 대조, 선택적 Docker 함수 테스트. 등록 테스트와 실행 환경이 없으면 기능 정확성 미검증으로 표시합니다. 다른 언어 및 임의 프로젝트 빌드는 미지원입니다.
-- 강의·첨부자료: 원문/의미 단위 요구사항 대조. 줄 개수로 완전성을 계산하지 않습니다.
-- 일반지식: 등록 근거와 비교. 자동 공식 문서 검색이나 전면적 팩트체크는 미지원입니다.
-- 추론: 등록 정답·조건 대조 및 명시적 검사. 범용 계산·증명 검증은 미지원입니다.
+- 강의·첨부자료: 원문/의미 단위 요구사항과 추출한 사실 주장을 등록 근거에 대조합니다. 줄 개수로 완전성을 계산하지 않습니다.
+- 일반지식·근거 없는 비코딩 대화: 추출한 문장 후보를 등록 근거와 먼저 대조합니다. 기존 근거로 판정할 수 없는 핵심 사실 주장에만 Brave 웹 검색을 적용하고, 확인한 페이지 본문과 다시 대조합니다. 일반지식 유형은 등록 자료가 있어도 검색을 보조로 사용할 수 있습니다. 다른 유형은 첨부 원문·기준 답안·등록 출처가 없을 때만 검색합니다. 검색 키 없이도 평가되지만 미검증 주장이 남을 수 있습니다. 긴 답변에서는 코드 블록을 제외하고 앞·중간·끝에서 고르게 최대 20개 문장 후보를 뽑고, 최대 3개 핵심 주장·검색 결과 2개씩 확인합니다. 이 범위 밖은 검토 필요로 표시합니다. 웹 근거를 사용했거나 검색을 시도한 평가는 하루가 지나면 재평가 필요로 표시합니다. 검색 결과의 출처 신뢰성과 주장 추출 누락에 대한 독립적인 사람 검증은 아직 필요합니다.
+- 추론: 등록 정답·조건 대조, 명시적 검사와 추출한 사실 주장의 등록 근거 대조. 답변과 등록 기준 답안이 각각 숫자 하나일 때는 수치를 직접 비교해 Truthfulness에 반영합니다. 범용 계산·증명 검증은 미지원입니다.
+- 일반 모델의 비코딩 유형은 근거와 모순으로 판정된 주장의 중요도와 개수로 Truthfulness 0~3점을 계산하고, 미검증 주장은 감점하지 않고 검토 필요로 표시합니다. 미래 도입 계획처럼 현재 상태를 직접 말하지 않는 근거만으로 현재 지원 여부를 모순이라 단정하지 않도록 JEV에 지시합니다. 근거 대조에 사용한 JEV 선택의 확신도가 0.70 미만이거나 없으면 점수를 유지하면서 검토 필요로 표시합니다. 선택 확신도는 정확도 보장이 아닙니다. `4`처럼 짧은 답도 주장 후보로 추출하며, 내용이 있는데 후보 추출에 실패하거나 검사 상한 밖 후보가 남아 사실 주장 여부를 알 수 없으면 판정 불가와 검토 필요를 표시합니다. 추출 후보를 모두 사실 주장 아님으로 분류했어도 그 선택 확신도가 낮으면 '해당 없음' 대신 판정 불가·검토 필요로 남깁니다. 동일 문장의 반복은 한 주장으로 세며, 뜻이 같지만 표현이 다른 문장의 중복은 자동으로 합치지 않습니다. 3점은 모든 사실의 검증 완료를 뜻하지 않습니다. 웹 검색은 일반지식 유형과 근거가 없는 다른 비코딩 대화의 미검증 핵심 주장에만 적용합니다.
 - HTML: Chromium에서 스크립트·외부 자원을 차단하고 텍스트·숨김·가로 넘침을 관측합니다. 첫 화면 PNG는 `data/artifacts`에 저장합니다. 레이아웃 관측은 시각적 품질 판정을 대체하지 않습니다.
 - 생성 시간은 수집하지 않으며 답변 텍스트로 추측하지 않습니다.
 - 요구사항 최대 40개, 출처 최대 30개, 답변/근거 위치 각각 최대 200개, 입력 크기 제한이 있습니다. 초과 시 오류를 내고 조용히 잘라내지 않습니다.
@@ -124,6 +125,8 @@ Docker와 로컬 `python:3.12-slim` 이미지가 필요합니다. 앱은 이미�
 .\.venv\Scripts\python.exe validate.py --split all --output validation/offline-run.json
 # 고정 버전으로 조정용 사례를 3회 평가
 .\.venv\Scripts\python.exe validate.py --live --split calibration --repeats 3 --output validation/calibration-new.json
+# 일반지식·첨부자료·추론의 원문 일치·모순·근거 부족, 권고·과장·중복 사례를 실제 JEV로 진단 (검색 키 사용 안 함)
+.\.venv\Scripts\python.exe validation/smoke_fact.py
 # HTML/거절/주입 변형 진단
 .\.venv\Scripts\python.exe validate.py --live --cases validation/metamorphic.json --repeats 3 --output validation/metamorphic-run.json
 # 독립적인 사람 라벨이 준비된 뒤 최종 검증
@@ -134,6 +137,18 @@ Docker와 로컬 `python:3.12-slim` 이미지가 필요합니다. 앱은 이미�
 
 예제는 AI가 작성한 합성 진단 자료이며 독립적인 사람 정답이 아닙니다. 최종 검증용 자료는 조정에 사용하지 않습니다.
 `cases.human-labels.template.json`의 reviewer, humanReviewed, axes를 사람이 작성해야 정확도 집계에 포함됩니다.
+일반 모델의 비코딩 사례는 같은 파일의 `claims`에도 주장별 `relation`(SUPPORTED, CONTRADICTED, UNVERIFIED, NOT_APPLICABLE)을 사람이 Jev 결과를 보기 전에 기록할 수 있습니다. `missingClaims`에는 자동 추출에서 빠진 주장과 관계를 기록합니다. 실평가 검증은 앱과 동일한 서버 평가 경로를 사용하며, `factClaims` 지표에 주장 관계 일치율·모순 누락·잘못된 모순 판정·미검증 건수·사람이 확인한 모순을 3점·검토 불필요로 통과시킨 건수를 따로 냅니다. 사람 라벨이 없으면 이 지표는 신뢰성 검증 결과가 아닙니다.
+
+실제 앱에 저장된 일반 모델 평가를 사람이 검토할 때는 현재 기준으로 평가된 결과만 로컬 파일로 내보낼 수 있습니다. 출력에는 질문·답변·등록 자료가 포함되므로 기본 저장 위치는 Git에서 제외한 `data/review`입니다. 로컬 `validation/review_labels.html`을 브라우저에서 열고 라벨 템플릿 JSON을 선택하면 Jev의 판정을 보지 않고 주장별 관계·중요도·누락을 기록해 새 JSON으로 내려받을 수 있습니다. Jev 결과 파일은 사람 판정을 마친 뒤에 열어 비교합니다. 앱 데이터에서 뽑은 사례는 자동으로 독립적인 홀드아웃 표본이 되지 않습니다.
+
+```powershell
+.\.venv\Scripts\python.exe validation/export_app_review.py
+# data/review/app-review-labels.template.json을 사람이 작성해 app-review-labels.json으로 저장한 뒤
+.\.venv\Scripts\python.exe validate.py --report-from data/review/app-review-run.json --labels data/review/app-review-labels.json --output data/review/app-review-metrics.json
+# 같은 입력의 점수와 주장 관계가 바뀌는지 확인 (기준 실행 + Jev 재평가 2회)
+.\.venv\Scripts\python.exe validation/recheck_app_stability.py --packet data/review/app-review-run.json --output data/review/stability.json
+```
+
 caseHash가 실행 자료와 일치해야 집계합니다. 최초 반복만 사람 일치율에 사용하고 반복 횟수로 표본 수를 부풀리지 않습니다.
 유형×축별 일치율, 95% Wilson 구간, 오탐·누락·큰 오차, 판정 가능률과 반복 안정성을 별도로 보고합니다.
 사람 라벨·충분한 표본·사전 합격 기준 충족 전에는 신뢰성이 검증됐다고 표시하지 않습니다.

@@ -36,7 +36,20 @@
       "response_length": null,
       "style_clarity": null,
       "safety": null
-    }
+    },
+    "claims": {
+      "C1": {
+        "text": "목적은 파일 읽기 능력 비교입니다.",
+        "relation": null,
+        "importance": null
+      },
+      "C2": {
+        "text": "파일을 업로드하고 질문합니다.",
+        "relation": null,
+        "importance": null
+      }
+    },
+    "missingClaims": []
   },
   {
     "id": "doc_missing",
@@ -49,7 +62,15 @@
       "response_length": null,
       "style_clarity": null,
       "safety": null
-    }
+    },
+    "claims": {
+      "C1": {
+        "text": "파일을 업로드하고 질문합니다.",
+        "relation": null,
+        "importance": null
+      }
+    },
+    "missingClaims": []
   },
   {
     "id": "knowledge_unverified",
@@ -62,7 +83,15 @@
       "response_length": null,
       "style_clarity": null,
       "safety": null
-    }
+    },
+    "claims": {
+      "C1": {
+        "text": "H2O입니다.",
+        "relation": null,
+        "importance": null
+      }
+    },
+    "missingClaims": []
   },
   {
     "id": "knowledge_repeated",
@@ -75,7 +104,15 @@
       "response_length": null,
       "style_clarity": null,
       "safety": null
-    }
+    },
+    "claims": {
+      "C1": {
+        "text": "물은 H2O입니다.",
+        "relation": null,
+        "importance": null
+      }
+    },
+    "missingClaims": []
   },
   {
     "id": "reason_good",
@@ -88,7 +125,15 @@
       "response_length": null,
       "style_clarity": null,
       "safety": null
-    }
+    },
+    "claims": {
+      "C1": {
+        "text": "4",
+        "relation": null,
+        "importance": null
+      }
+    },
+    "missingClaims": []
   },
   {
     "id": "reason_wrong",
@@ -101,7 +146,15 @@
       "response_length": null,
       "style_clarity": null,
       "safety": null
-    }
+    },
+    "claims": {
+      "C1": {
+        "text": "5",
+        "relation": null,
+        "importance": null
+      }
+    },
+    "missingClaims": []
   },
   {
     "id": "code_holdout",
@@ -127,7 +180,15 @@
       "response_length": null,
       "style_clarity": null,
       "safety": null
-    }
+    },
+    "claims": {
+      "C1": {
+        "text": "참석 인원\t80명",
+        "relation": null,
+        "importance": null
+      }
+    },
+    "missingClaims": []
   },
   {
     "id": "knowledge_holdout",
@@ -140,7 +201,15 @@
       "response_length": null,
       "style_clarity": null,
       "safety": null
-    }
+    },
+    "claims": {
+      "C1": {
+        "text": "A는 출력이고 B는 입력입니다.",
+        "relation": null,
+        "importance": null
+      }
+    },
+    "missingClaims": []
   },
   {
     "id": "reason_holdout",
@@ -153,6 +222,14 @@
       "response_length": null,
       "style_clarity": null,
       "safety": null
-    }
+    },
+    "claims": {
+      "C1": {
+        "text": "{\"answer\":4}",
+        "relation": null,
+        "importance": null
+      }
+    },
+    "missingClaims": []
   }
 ]

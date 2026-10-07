@@ -1,16 +1,18 @@
 import csv
+import os
 import io
 import json
 import tempfile
 import threading
 import unittest
 import urllib.request
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 from http.server import ThreadingHTTPServer
 
 import evaluation as rubric
-from server import AppHandler, EvaluationInProgress, connect, init_db
+from server import AppHandler, EvaluationInProgress, connect, init_db, evaluation_fingerprint, web_evidence_expired
 
 
 def fake_jev(state, model, questions):
@@ -21,7 +23,10 @@ def fake_jev(state, model, questions):
                             'probabilities': {'0': 0.0, '1': 0.0, '2': 0.0, '3': 1.0}}
             continue
         choices = question['criteria']
-        preferred = ('RATED' if key.startswith('status_') else
+        preferred = ('HIGH' if key.startswith('fact_kind_') else
+                     'SUPPORTED' if key.startswith('fact_relation_') and 'E1' in state.get('sources', {}) else
+                     'INSUFFICIENT' if key.startswith('fact_relation_') else
+                     'RATED' if key.startswith('status_') else
                      'APPLIES' if key.startswith('bot_if_applicability_') else
                      'BOTH' if key.startswith('bot_if_target_') else
                      'MET' if key.startswith('requirement_') else
@@ -38,6 +43,31 @@ def case(category='일반지식·설명', fmt='text'):
 
 
 class RubricTests(unittest.TestCase):
+    def test_web_fact_result_expires_and_search_configuration_changes_fingerprint(self):
+        old=(datetime.now(UTC)-timedelta(days=2)).isoformat()
+        report={'factVerification':{'searchAttempts':[{'claimId':'C1','status':'no_result'}]}}
+        self.assertTrue(web_evidence_expired(report,old))
+        self.assertFalse(web_evidence_expired({'factVerification':{'searchAttempts':[]}},old))
+        item={'evaluation_mode':'model','category':'일반지식·설명'}
+        response={'content':'답변','model':'test'}
+        with patch.dict(os.environ,{'BRAVE_SEARCH_API_KEY':''}):
+            without=evaluation_fingerprint(item,response,None,{},'jev-test')
+        with patch.dict(os.environ,{'BRAVE_SEARCH_API_KEY':'configured'}):
+            with_key=evaluation_fingerprint(item,response,None,{},'jev-test')
+        self.assertNotEqual(without,with_key)
+        source_free={**item,'category':'추론·문제해결','attachment_text':''}
+        with patch.dict(os.environ,{'BRAVE_SEARCH_API_KEY':''}):
+            without=evaluation_fingerprint(source_free,response,None,{},'jev-test')
+        with patch.dict(os.environ,{'BRAVE_SEARCH_API_KEY':'configured'}):
+            with_key=evaluation_fingerprint(source_free,response,None,{},'jev-test')
+        self.assertNotEqual(without,with_key)
+        source_bound={**source_free,'attachment_text':'등록한 원문'}
+        with patch.dict(os.environ,{'BRAVE_SEARCH_API_KEY':''}):
+            without=evaluation_fingerprint(source_bound,response,None,{},'jev-test')
+        with patch.dict(os.environ,{'BRAVE_SEARCH_API_KEY':'configured'}):
+            with_key=evaluation_fingerprint(source_bound,response,None,{},'jev-test')
+        self.assertEqual(without,with_key)
+
     def test_all_categories_same_axes(self):
         for category in rubric.CATEGORIES:
             state, questions = rubric.prepare(case(category), {'content':'x는 2입니다.'})
@@ -234,6 +264,245 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(rows[0]['instruction_following'],'3.0')
         self.assertEqual(rows[0]['score_type'],'expected_level_0_3')
         self.assertEqual(json.loads(rows[0]['report_json'])['axes']['truthfulness']['score'],3)
+
+    def test_general_chat_uses_existing_evidence_without_search(self):
+        created=self.handler.create_case({'title':'facts','category':'일반지식·설명',
+            'prompt':'파일 내보내기가 가능한가?',
+            'responses':{'gpt-5.6-sol':'무료 요금제에서는 파일을 내보낼 수 있습니다.'},
+            'evaluationSpec':{'expectedAnswer':'무료 요금제에서는 파일을 내보낼 수 있습니다.','confirmed':True}})
+        rid=created['responses'][0]['id']
+        def judge(state,model,questions):
+            raw=fake_jev(state,model,questions)
+            raw['answers']['fact_kind_C1']={'choice':'HIGH'}
+            raw['answers']['fact_relation_C1']={'choice':'SUPPORTED'}
+            raw['answers']['fact_source_C1']={'choice':'E1'}
+            return raw
+        with patch('server.call_jev',side_effect=judge) as calls, patch('server.fact_verification.search') as search:
+            report=self.handler.evaluate(rid)['report']
+        self.assertEqual(calls.call_count,1)
+        search.assert_not_called()
+        self.assertEqual(report['axes']['truthfulness']['score'],3)
+        self.assertEqual(report['factVerification']['verifiedCount'],1)
+        self.handler.wfile=io.BytesIO()
+        self.handler.send_response=lambda *args: None
+        self.handler.send_header=lambda *args: None
+        self.handler.end_headers=lambda: None
+        self.handler.export_csv()
+        exported=list(csv.DictReader(io.StringIO(self.handler.wfile.getvalue().decode('utf-8-sig'))))[0]
+        self.assertEqual(exported['truthfulness_verified_count'],'1')
+        self.assertEqual(exported['truthfulness_scoring_method'],'confirmed_claim_contradictions')
+
+    def test_general_chat_searches_only_unresolved_core_claim(self):
+        created=self.handler.create_case({'title':'facts','category':'일반지식·설명',
+            'prompt':'파일 내보내기가 가능한가?',
+            'responses':{'gpt-5.6-sol':'무료 요금제에서는 파일을 내보낼 수 있습니다.'},
+            'evaluationSpec':{'confirmed':True}})
+        rid=created['responses'][0]['id']
+        def judge(state,model,questions):
+            raw=fake_jev(state,model,questions)
+            raw['answers']['fact_kind_C1']={'choice':'HIGH'}
+            raw['answers']['fact_relation_C1']={'choice':'CONTRADICTED' if state['sources'] else 'INSUFFICIENT'}
+            raw['answers']['fact_source_C1']={'choice':'E1' if state['sources'] else 'NONE'}
+            return raw
+        def retrieve(rows,sources,metadata):
+            self.assertEqual(rows[0]['relation'],'UNVERIFIED')
+            metadata['E1']={'title':'official','kind':'searched_web_page',
+                            'reference':{'url':'https://example.org','checkedAt':'2026-10-06'}}
+            return {'E1':'무료 요금제는 파일 내보내기를 지원하지 않습니다.'}, [{'claimId':'C1','status':'retrieved'}]
+        with patch('server.call_jev',side_effect=judge) as calls, patch('server.fact_verification.retrieve',side_effect=retrieve):
+            report=self.handler.evaluate(rid)['report']
+        self.assertEqual(calls.call_count,2)
+        self.assertEqual(report['axes']['truthfulness']['score'],1)
+        self.assertEqual(report['factVerification']['majorCount'],1)
+        self.assertIn('webSearchMs',report['timings'])
+        self.assertIn('jevMs',report['timings'])
+
+    def test_source_free_reasoning_chat_can_search_unresolved_core_claim(self):
+        created=self.handler.create_case({'title':'open chat','category':'추론·문제해결',
+            'prompt':'서비스 기능을 설명해줘.',
+            'responses':{'gpt-5.6-sol':'무료 요금제에서는 파일을 내보낼 수 있습니다.'},
+            'evaluationSpec':{'confirmed':True}})
+        rid=created['responses'][0]['id']
+        def judge(state,model,questions):
+            raw=fake_jev(state,model,questions)
+            raw['answers']['fact_relation_C1']={'choice':'CONTRADICTED' if state['sources'] else 'INSUFFICIENT',
+                                                'confidence':.95}
+            raw['answers']['fact_source_C1']={'choice':'E1' if state['sources'] else 'NONE',
+                                              'confidence':.95}
+            return raw
+        def retrieve(rows,sources,metadata):
+            self.assertEqual(rows[0]['relation'],'UNVERIFIED')
+            metadata['E1']={'title':'official','kind':'searched_web_page'}
+            return {'E1':'무료 요금제는 파일 내보내기를 지원하지 않습니다.'}, [{'claimId':'C1','status':'retrieved'}]
+        with patch('server.call_jev',side_effect=judge) as calls, \
+                patch('server.fact_verification.retrieve',side_effect=retrieve) as search:
+            report=self.handler.evaluate(rid)['report']
+        self.assertEqual(calls.call_count,2)
+        search.assert_called_once()
+        self.assertEqual(report['axes']['truthfulness']['score'],1)
+        self.assertEqual(report['factVerification']['verificationMode'],'web_fallback')
+
+    def test_other_model_categories_use_claim_score_without_web_search(self):
+        for category in ('강의·첨부자료','추론·문제해결'):
+            with self.subTest(category=category):
+                created=self.handler.create_case({'title':category,'category':category,
+                    'prompt':'자료에 따라 답해줘.',
+                    'responses':{'gpt-5.6-sol':'행사는 화요일에 열립니다.'},
+                    'evaluationSpec':{'expectedAnswer':'행사는 월요일에 열립니다.','confirmed':True}})
+                rid=created['responses'][0]['id']
+                def judge(state,model,questions):
+                    raw=fake_jev(state,model,questions)
+                    raw['answers']['fact_kind_C1']={'choice':'HIGH','confidence':.95}
+                    raw['answers']['fact_relation_C1']={'choice':'CONTRADICTED','confidence':.42}
+                    raw['answers']['fact_source_C1']={'choice':'E1','confidence':.95}
+                    return raw
+                with patch('server.call_jev',side_effect=judge), \
+                        patch('server.check_answer_links') as links, \
+                        patch('server.fact_verification.retrieve') as search:
+                    report=self.handler.evaluate(rid)['report']
+                links.assert_not_called()
+                search.assert_not_called()
+                self.assertEqual(report['axes']['truthfulness']['score'],1)
+                self.assertEqual(report['factVerification']['verificationMode'],'registered_sources_only')
+                self.assertEqual(report['factVerification']['lowConfidenceVerifiedCount'],1)
+                self.assertTrue(report['axes']['truthfulness']['needsReview'])
+                self.assertTrue(report['needsReview'])
+
+    def test_other_model_categories_keep_unverified_claim_for_review(self):
+        created=self.handler.create_case({'title':'reasoning unknown','category':'추론·문제해결',
+            'prompt':'행사 날짜를 알려줘.',
+            'attachmentText':'등록한 자료에는 행사 날짜가 없습니다.',
+            'responses':{'gpt-5.6-sol':'행사는 화요일에 열립니다.'},
+            'evaluationSpec':{'confirmed':True}})
+        rid=created['responses'][0]['id']
+        def judge(state,model,questions):
+            raw=fake_jev(state,model,questions)
+            raw['answers']['fact_kind_C1']={'choice':'HIGH','confidence':.95}
+            raw['answers']['fact_relation_C1']={'choice':'INSUFFICIENT','confidence':.95}
+            raw['answers']['fact_source_C1']={'choice':'NONE','confidence':.95}
+            return raw
+        with patch('server.call_jev',side_effect=judge), \
+                patch('server.fact_verification.retrieve') as search:
+            report=self.handler.evaluate(rid)['report']
+        search.assert_not_called()
+        self.assertEqual(report['axes']['truthfulness']['score'],3)
+        self.assertTrue(report['axes']['truthfulness']['needsReview'])
+        self.assertEqual(report['factVerification']['unverifiedCount'],1)
+        self.assertEqual(report['factVerification']['unsearchedHighCount'],0)
+
+    def test_short_numeric_answer_uses_claim_truthfulness(self):
+        created=self.handler.create_case({'title':'short number','category':'추론·문제해결',
+            'prompt':'2+2의 답만 알려줘.',
+            'responses':{'gpt-5.6-sol':'5'},
+            'evaluationSpec':{'expectedAnswer':'4','confirmed':True}})
+        rid=created['responses'][0]['id']
+        def judge(state,model,questions):
+            raw=fake_jev(state,model,questions)
+            raw['answers']['fact_kind_C1']={'choice':'HIGH'}
+            raw['answers']['fact_relation_C1']={'choice':'INSUFFICIENT'}
+            raw['answers']['fact_source_C1']={'choice':'NONE'}
+            return raw
+        with patch('server.call_jev',side_effect=judge):
+            report=self.handler.evaluate(rid)['report']
+        self.assertEqual(report['factVerification']['claims'][0]['text'],'5')
+        self.assertEqual(report['factVerification']['claims'][0]['verificationMethod'],'exact_numeric_reference')
+        self.assertEqual(report['axes']['truthfulness']['score'],1)
+
+    def test_unextractable_model_answer_does_not_revert_to_old_truth_score(self):
+        created=self.handler.create_case({'title':'no span','category':'일반지식·설명',
+            'prompt':'답을 알려줘.',
+            'responses':{'gpt-5.6-sol':'.'},
+            'evaluationSpec':{'expectedAnswer':'답은 4입니다.','confirmed':True}})
+        rid=created['responses'][0]['id']
+        with patch('server.call_jev',side_effect=fake_jev):
+            report=self.handler.evaluate(rid)['report']
+        self.assertIsNone(report['axes']['truthfulness']['score'])
+        self.assertEqual(report['axes']['truthfulness']['status'],'unverifiable')
+        self.assertTrue(report['factVerification']['needsReview'])
+        self.assertTrue(report['needsReview'])
+
+    def test_uncertain_nonfact_verdict_is_not_marked_not_applicable(self):
+        created=self.handler.create_case({'title':'uncertain nonfact','category':'추론·문제해결',
+            'prompt':'행사 날짜는?',
+            'responses':{'gpt-5.6-sol':'행사는 화요일입니다.'},
+            'evaluationSpec':{'confirmed':True}})
+        rid=created['responses'][0]['id']
+        def judge(state,model,questions):
+            raw=fake_jev(state,model,questions)
+            raw['answers']['fact_kind_C1']={'choice':'NONE','confidence':.3}
+            return raw
+        with patch('server.call_jev',side_effect=judge):
+            report=self.handler.evaluate(rid)['report']
+        self.assertIsNone(report['axes']['truthfulness']['score'])
+        self.assertEqual(report['axes']['truthfulness']['status'],'unverifiable')
+        self.assertTrue(report['axes']['truthfulness']['needsReview'])
+        self.assertTrue(report['needsReview'])
+
+    def test_model_retries_one_inconsistent_jev_score_response(self):
+        created=self.handler.create_case({'title':'score retry','category':'코딩',
+            'prompt':'Python 코드를 작성해줘.',
+            'responses':{'gpt-5.6-sol':'print(1)'},
+            'evaluationSpec':{'confirmed':True}})
+        rid=created['responses'][0]['id']
+        calls=0
+        def judge(state,model,questions):
+            nonlocal calls
+            calls+=1
+            raw=fake_jev(state,model,questions)
+            if calls==1:
+                raw['answers']['instruction_following']['score']=2.0
+            return raw
+        with patch('server.call_jev',side_effect=judge):
+            report=self.handler.evaluate(rid)['report']
+        self.assertEqual(calls,2)
+        self.assertEqual(report['jevRetryCount'],1)
+        self.assertEqual(report['axes']['instruction_following']['score'],3.0)
+
+    def test_general_chat_checks_cited_page_before_search(self):
+        created=self.handler.create_case({'title':'cited','category':'일반지식·설명',
+            'prompt':'파일 내보내기가 가능한가?',
+            'responses':{'gpt-5.6-sol':'무료 요금제에서는 파일을 내보낼 수 없습니다. https://example.org/plans'},
+            'evaluationSpec':{'confirmed':True}})
+        rid=created['responses'][0]['id']
+        links={'items':[{'status':'verified','excerpt':'무료 요금제는 파일 내보내기를 지원하지 않습니다.',
+                         'url':'https://example.org/plans','finalUrl':'https://example.org/plans',
+                         'title':'공식 요금제','checkedAt':'2026-10-06'}], 'skippedCount':0}
+        def judge(state,model,questions):
+            raw=fake_jev(state,model,questions)
+            raw['answers']['fact_kind_C1']={'choice':'HIGH'}
+            raw['answers']['fact_relation_C1']={'choice':'SUPPORTED'}
+            raw['answers']['fact_source_C1']={'choice':'E1'}
+            return raw
+        with patch('server.check_answer_links',return_value=links), patch('server.call_jev',side_effect=judge), \
+                patch('server.fact_verification.search') as search:
+            report=self.handler.evaluate(rid)['report']
+        search.assert_not_called()
+        self.assertEqual(report['factVerification']['verifiedCount'],1)
+        self.assertEqual(report['sourceMetadata']['E1']['kind'],'verified_cited_web_page')
+        old=(datetime.now(UTC)-timedelta(days=2)).isoformat()
+        with connect(self.handler.db_path) as db:
+            db.execute('UPDATE evaluations SET created_at = ? WHERE response_id = ?', (old,rid))
+        self.assertIsNone(self.handler.cached_evaluation(rid))
+        self.assertIn('웹 근거 확인 시점 만료',self.handler.list_results()['items'][0]['staleReasons'])
+
+    def test_general_html_uses_visible_text_as_claim(self):
+        created=self.handler.create_case({'title':'html facts','category':'일반지식·설명',
+            'prompt':'무료 요금제의 내보내기를 설명해줘.',
+            'responses':{'gpt-5.6-sol':'<p>무료 요금제에서는 파일을 내보낼 수 없습니다.</p>'},
+            'evaluationSpec':{'expectedAnswer':'무료 요금제에서는 파일을 내보낼 수 없습니다.',
+                              'outputFormat':'html','confirmed':True}})
+        rid=created['responses'][0]['id']
+        def judge(state,model,questions):
+            self.assertEqual(state['claims']['C1'],'무료 요금제에서는 파일을 내보낼 수 없습니다.')
+            raw=fake_jev(state,model,questions)
+            raw['answers']['fact_kind_C1']={'choice':'HIGH'}
+            raw['answers']['fact_relation_C1']={'choice':'SUPPORTED'}
+            raw['answers']['fact_source_C1']={'choice':'E1'}
+            return raw
+        inspection={'rendered':True,'observations':{'visibleText':'무료 요금제에서는 파일을 내보낼 수 없습니다.'}}
+        with patch('server.inspect_html',return_value=inspection), patch('server.call_jev',side_effect=judge):
+            report=self.handler.evaluate(rid)['report']
+        self.assertEqual(report['factVerification']['verifiedCount'],1)
 
     def test_function_execution_status_and_evidence_reach_report(self):
         created=self.handler.create_case({'title':'code','category':'코딩','prompt':'add 함수를 작성해줘',

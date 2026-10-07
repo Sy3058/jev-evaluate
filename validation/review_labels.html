@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+<title>Truthfulness 사람 검토</title>
+<style>
+  :root { font-family: system-ui, sans-serif; color: #1b2533; background: #f5f7fb; }
+  body { max-width: 1100px; margin: 24px auto; padding: 0 16px 60px; }
+  h1, h2, h3 { line-height: 1.3; }
+  p { line-height: 1.55; }
+  .panel, .claim { background: white; border: 1px solid #ccd4df; border-radius: 10px; padding: 16px; margin: 12px 0; }
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  button, select, input, textarea { font: inherit; padding: 7px; }
+  button { cursor: pointer; border: 1px solid #6e7f99; border-radius: 6px; background: white; }
+  button.primary { color: white; border-color: #1856a0; background: #1856a0; }
+  button:disabled { opacity: .5; cursor: default; }
+  select { max-width: 100%; }
+  label { display: inline-flex; gap: 6px; align-items: center; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 330px; overflow: auto; padding: 12px; background: #f3f5f8; border-radius: 6px; }
+  .claim p { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .claim-controls { display: flex; gap: 12px; flex-wrap: wrap; }
+  .claim-controls label { flex-direction: column; align-items: flex-start; }
+  .claim textarea, #missing { width: 100%; box-sizing: border-box; min-height: 56px; }
+  .muted { color: #536173; }
+  .warning { color: #9e351f; font-weight: 600; }
+  #review { display: none; }
+</style>
+<h1>Truthfulness 사람 검토</h1>
+<p>이 화면은 선택한 JSON 파일을 브라우저 안에서만 읽습니다. Jev 판정 파일은 라벨 작성 후에 열어 비교하세요.</p>
+<div class="panel toolbar">
+  <label>검토 파일 <input id="source" type="file" accept=".json,application/json"></label>
+  <button id="download" class="primary" disabled>라벨 JSON 내려받기</button>
+  <span id="status" role="status">검토 파일을 선택하세요.</span>
+</div>
+<main id="review">
+  <div class="panel toolbar">
+    <button id="prev">이전</button><select id="case-list" aria-label="검토 사례"></select><button id="next">다음</button>
+    <span id="progress"></span>
+  </div>
+  <section class="panel">
+    <h2 id="case-title"></h2>
+    <p id="case-meta" class="muted"></p>
+    <label>검토자 <input id="reviewer" autocomplete="name"></label>
+    <label>Truthfulness 사람 점수 (선택) <select id="truth-score"><option value="">미입력</option><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
+    <p><label><input id="completed" type="checkbox"> 이 사례의 주장과 누락을 검토했습니다</label></p>
+    <p id="completion-message" class="warning" role="status"></p>
+  </section>
+  <section class="panel"><h3>질문</h3><pre id="prompt"></pre><details><summary>이전 대화</summary><pre id="conversation"></pre></details></section>
+  <section class="panel"><h3>모델 답변</h3><pre id="answer"></pre><details id="visible-wrap"><summary>HTML 화면에 보인 본문</summary><pre id="visible-answer"></pre></details></section>
+  <section class="panel"><h3>대조 자료</h3><details open><summary>첨부 원문</summary><pre id="attachment"></pre></details><details><summary>등록 기준 답안</summary><pre id="expected"></pre></details><div id="references"></div></section>
+  <section class="panel"><h3>주장별 사람 판정</h3><p class="muted">일부 내용이 맞아도 중요한 사실 하나가 직접 반박되면 CONTRADICTED로 표시하고, 판단 이유를 메모에 적으세요. 자료가 부족하면 UNVERIFIED를 선택하세요.</p><div id="claims"></div></section>
+  <section class="panel"><h3>자동 추출에서 빠진 주장</h3><p class="muted">한 줄에 <code>CONTRADICTED | 답변의 빠진 주장</code>처럼 관계와 문장을 적으세요. 사용할 관계: SUPPORTED, CONTRADICTED, UNVERIFIED, NOT_APPLICABLE. 답변 전체를 읽고 누락을 확인해야 검토 완료로 표시할 수 있습니다.</p><textarea id="missing"></textarea></section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const relationChoices = [['','선택'],['SUPPORTED','근거와 일치'],['CONTRADICTED','근거와 모순'],['UNVERIFIED','미검증'],['NOT_APPLICABLE','사실 주장 아님']];
+const importanceChoices = [['','선택'],['HIGH','핵심'],['LOW','부수적'],['NONE','사실 주장 아님']];
+let labels = [], current = 0, changed = false;
+function validReview(item) {
+  return Boolean(item.reviewer?.trim()) &&
+    Object.values(item.claims || {}).every(claim => claim.relation && claim.importance) &&
+    (item.missingClaims || []).every(entry => typeof entry === 'object' && entry !== null &&
+      entry.text?.trim() && relationChoices.some(([code]) => code && code === entry.relation));
+}
+function choices(options, value, change) {
+  const select = document.createElement('select');
+  for (const [code, name] of options) {
+    const option = document.createElement('option'); option.value = code; option.textContent = name; select.append(option);
+  }
+  select.value = value || '';
+  select.addEventListener('change', () => { change(select.value || null); changed = true; updateProgress(); });
+  return select;
+}
+function label(text, control) {
+  const element = document.createElement('label');
+  const caption = document.createElement('span'); caption.textContent = text;
+  element.append(caption, control);
+  return element;
+}
+function updateProgress() {
+  const complete = labels.filter(item => item.humanReviewed).length;
+  $('progress').textContent = `${current + 1}/${labels.length} · 검토 완료 ${complete}건`;
+  $('case-list').querySelectorAll('option').forEach((option, index) => {
+    option.textContent = `${labels[index].humanReviewed ? '✓ ' : ''}${index + 1}. ${labels[index].title || labels[index].id} · ${labels[index].model || ''}`;
+  });
+  $('status').textContent = changed ? '변경 내용이 있습니다. JSON을 내려받아 저장하세요.' : `검토 파일 ${labels.length}건`;
+}
+function show(index) {
+  current = index; const item = labels[index];
+  $('case-list').value = String(index);
+  $('prev').disabled = index === 0; $('next').disabled = index === labels.length - 1;
+  $('case-title').textContent = item.title || item.id;
+  $('case-meta').textContent = `${item.category || ''} · ${item.model || ''} · ${item.id}`;
+  for (const [target, source] of [['prompt','prompt'],['conversation','conversationHistory'],['answer','answer'],['visible-answer','visibleAnswer'],['attachment','attachment'],['expected','expectedAnswer']]) {
+    $(target).textContent = item[source] || '내용 없음';
+  }
+  $('visible-wrap').hidden = !item.visibleAnswer;
+  $('reviewer').value = item.reviewer || '';
+  $('truth-score').value = item.axes?.truthfulness == null ? '' : String(item.axes.truthfulness);
+  $('completed').checked = item.humanReviewed === true;
+  $('completion-message').textContent = '';
+  $('missing').value = (item.missingClaims || []).map(entry => typeof entry === 'string'
+    ? entry : `${entry.relation || ''} | ${entry.text || ''}`).join('\n');
+  $('references').replaceChildren();
+  (item.references || []).forEach((reference, i) => {
+    const details = document.createElement('details');
+    const summary = document.createElement('summary'); summary.textContent = `등록 출처 ${i + 1}: ${reference.title || '제목 없음'}`;
+    const pre = document.createElement('pre'); pre.textContent = reference.text || '내용 없음';
+    details.append(summary, pre); $('references').append(details);
+  });
+  $('claims').replaceChildren();
+  for (const [id, claim] of Object.entries(item.claims || {})) {
+    const article = document.createElement('article'); article.className = 'claim';
+    const heading = document.createElement('h3'); heading.textContent = id;
+    const body = document.createElement('p'); body.textContent = claim.text || '';
+    const controls = document.createElement('div'); controls.className = 'claim-controls';
+    controls.append(label('근거 관계', choices(relationChoices, claim.relation, value => { claim.relation = value; })),
+                    label('중요도', choices(importanceChoices, claim.importance, value => { claim.importance = value; })));
+    const note = document.createElement('textarea'); note.placeholder = '판정 이유 또는 부분적으로 맞는 내용';
+    note.value = claim.reviewNote || '';
+    note.addEventListener('input', () => { claim.reviewNote = note.value; changed = true; updateProgress(); });
+    article.append(heading, body, controls, label('검토 메모', note)); $('claims').append(article);
+  }
+  updateProgress();
+}
+$('source').addEventListener('change', async event => {
+  try {
+    const file = event.target.files[0]; if (!file) return;
+    const parsed = JSON.parse(await file.text());
+    if (!Array.isArray(parsed) || !parsed.length || parsed.some(item => !item.id || !item.claims || !item.caseHash)) throw new Error('검토 라벨 JSON 형식이 아닙니다.');
+    labels = parsed; changed = false;
+    $('case-list').replaceChildren();
+    labels.forEach((_, index) => { const option = document.createElement('option'); option.value = String(index); $('case-list').append(option); });
+    $('review').style.display = 'block'; $('download').disabled = false; show(0);
+  } catch (error) { $('status').textContent = `파일을 읽지 못했습니다: ${error.message}`; }
+});
+$('case-list').addEventListener('change', event => show(Number(event.target.value)));
+$('prev').addEventListener('click', () => show(current - 1));
+$('next').addEventListener('click', () => show(current + 1));
+$('reviewer').addEventListener('input', event => { labels[current].reviewer = event.target.value; changed = true; updateProgress(); });
+$('truth-score').addEventListener('change', event => {
+  labels[current].axes.truthfulness = event.target.value === '' ? null : Number(event.target.value);
+  changed = true; updateProgress();
+});
+$('missing').addEventListener('input', event => {
+  labels[current].missingClaims = event.target.value.split('\n').map(line => line.trim()).filter(Boolean)
+    .map(line => {
+      const match = line.match(/^(SUPPORTED|CONTRADICTED|UNVERIFIED|NOT_APPLICABLE)\s*\|\s*(.+)$/);
+      return match ? {relation:match[1],text:match[2].trim()} : line;
+    });
+  changed = true; updateProgress();
+});
+$('completed').addEventListener('change', event => {
+  const item = labels[current];
+  if (event.target.checked && !validReview(item)) {
+    event.target.checked = false;
+    $('completion-message').textContent = '검토자, 모든 주장 관계·중요도, 빠진 주장의 관계를 입력한 뒤 완료로 표시하세요.';
+    return;
+  }
+  item.humanReviewed = event.target.checked; $('completion-message').textContent = '';
+  changed = true; updateProgress();
+});
+$('download').addEventListener('click', () => {
+  const invalid = labels.findIndex(item => item.humanReviewed && !validReview(item));
+  if (invalid >= 0) {
+    show(invalid);
+    $('completion-message').textContent = '완료로 표시된 사례에 빈 검토 항목이 있습니다. 입력하거나 완료 체크를 해제하세요.';
+    return;
+  }
+  const blob = new Blob([JSON.stringify(labels, null, 2) + '\n'], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'app-review-labels.json';
+  document.body.append(anchor); anchor.click(); anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  changed = false; updateProgress();
+});
+window.addEventListener('beforeunload', event => { if (changed) { event.preventDefault(); event.returnValue = ''; } });
+</script>
+</html>

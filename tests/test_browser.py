@@ -1,4 +1,5 @@
 import os
+import json
 import tempfile
 import threading
 import unittest
@@ -20,6 +21,49 @@ except ImportError:
 
 @unittest.skipUnless(sync_playwright, 'Playwright 미설치: 브라우저 검증 미실행')
 class BrowserTests(unittest.TestCase):
+    def test_local_truth_review_saves_blind_human_labels(self):
+        os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH',str(Path(__file__).resolve().parents[1]/'.browsers'))
+        html=Path(__file__).resolve().parents[1]/'validation/review_labels.html'
+        labels=[{'id':'response-1-evaluation-2','caseHash':'hash','title':'검토 사례',
+                 'category':'일반지식·설명','model':'test','prompt':'날짜는?',
+                 'answer':'행사는 화요일입니다.','attachment':'행사는 월요일입니다.',
+                 'reviewer':'','humanReviewed':False,'axes':{'truthfulness':None},
+                 'claims':{'C1':{'text':'행사는 화요일입니다.','relation':None,'importance':None}},
+                 'missingClaims':[]}]
+        with sync_playwright() as p:
+            browser=p.chromium.launch(headless=True)
+            try:
+                page=browser.new_page(accept_downloads=True)
+                page.goto(html.as_uri())
+                page.locator('#source').set_input_files({'name':'labels.json','mimeType':'application/json',
+                    'buffer':json.dumps(labels,ensure_ascii=False).encode('utf-8')})
+                expect(page.locator('#prompt')).to_have_text('날짜는?')
+                expect(page.locator('#attachment')).to_have_text('행사는 월요일입니다.')
+                page.locator('#completed').click()
+                expect(page.locator('#completed')).not_to_be_checked()
+                page.locator('#reviewer').fill('검토자')
+                page.locator('.claim-controls select').nth(0).select_option('CONTRADICTED')
+                page.locator('.claim-controls select').nth(1).select_option('HIGH')
+                page.locator('#missing').fill('추출에서 빠진 거짓 주장')
+                page.locator('#completed').click()
+                expect(page.locator('#completed')).not_to_be_checked()
+                page.locator('#missing').fill('CONTRADICTED | 추출에서 빠진 거짓 주장')
+                page.locator('#completed').check()
+                expect(page.locator('#progress')).to_contain_text('검토 완료 1건')
+                with page.expect_download() as download_info:
+                    page.locator('#download').click()
+                with tempfile.TemporaryDirectory() as directory:
+                    target=Path(directory)/'labels.json'
+                    download_info.value.save_as(target)
+                    saved=json.loads(target.read_text(encoding='utf-8'))
+                self.assertEqual(saved[0]['claims']['C1']['relation'],'CONTRADICTED')
+                self.assertEqual(saved[0]['claims']['C1']['importance'],'HIGH')
+                self.assertEqual(saved[0]['missingClaims'],[
+                    {'relation':'CONTRADICTED','text':'추출에서 빠진 거짓 주장'}])
+                self.assertTrue(saved[0]['humanReviewed'])
+            finally:
+                browser.close()
+
     def test_jev_project_guide_replays_offline_file(self):
         os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', str(Path(__file__).resolve().parents[1]/'.browsers'))
         html = Path(__file__).resolve().parents[1] / 'static' / 'jev-project-guide.html'
@@ -93,6 +137,39 @@ class BrowserTests(unittest.TestCase):
                         page=browser.new_page()
                         errors=[]; page.on('pageerror',lambda e: errors.append(str(e)))
                         page.goto(f'http://127.0.0.1:{http.server_port}')
+                        page.wait_for_function("() => Boolean(config?.criteria)")
+                        self.assertEqual(page.evaluate("""() => {
+                            mode = 'ai_bot';
+                            return resultStatus({report:{needsReview:true,
+                                botAssessment:{status:'compliant'}}});
+                        }"""),'지침·기대 결과 충족 · 검토 필요')
+                        fact_html=page.evaluate("""() => reportDetails({
+                            scoreType:'expected_level_0_3',
+                            axes:{truthfulness:{score:1,status:'rated',description:'근거 대조',
+                                scoringMethod:'confirmed_claim_contradictions',needsReview:true,notes:[]}},
+                            factVerification:{score:1,status:'rated',claimCount:1,verifiedCount:1,
+                                unverifiedCount:0,lowConfidenceVerifiedCount:1,skippedCandidateCount:0,
+                                searchAttempts:[],claims:[{id:'C1',text:'잘못된 사실',importance:'HIGH',
+                                    relation:'CONTRADICTED',sourceRef:'E1',sourceText:'확인한 원문',
+                                    importanceConfidence:.92,relationConfidence:.41,sourceConfidence:.96,
+                                    lowConfidenceFields:['relationConfidence']}]},
+                            requirements:[],checks:[],issues:[],sourceMetadata:{}
+                        })""")
+                        self.assertIn('선택 확신도 낮거나 없는 근거 대조 1개',fact_html)
+                        self.assertIn('판정 검토 필요',fact_html)
+                        self.assertIn('관계 0.41',fact_html)
+                        unknown_html=page.evaluate("""() => reportDetails({
+                            scoreType:'expected_level_0_3',
+                            axes:{truthfulness:{score:null,status:'unverifiable',description:'판정 보류',
+                                scoringMethod:'confirmed_claim_contradictions',needsReview:true,notes:[]}},
+                            factVerification:{score:null,status:'unverifiable',claimCount:0,verifiedCount:0,
+                                unverifiedCount:0,lowConfidenceExcludedCount:1,skippedCandidateCount:0,
+                                searchAttempts:[],claims:[{id:'C1',text:'행사는 화요일입니다.',
+                                    importance:'NONE',relation:'NOT_APPLICABLE',sourceRef:'NONE',
+                                    importanceConfidence:.38,lowConfidenceFields:['importanceConfidence']}]},
+                            requirements:[],checks:[],issues:[],sourceMetadata:{}
+                        })""")
+                        self.assertIn('사실 주장 아님 판정의 확신도 낮음 1개',unknown_html)
                         expect(page.locator('#bot-select-wrap')).to_have_count(0)
                         page.get_by_role('button',name='AI Bot 평가').click()
                         expect(page.locator('#bot-select-wrap')).to_be_visible()
@@ -243,9 +320,13 @@ class BrowserTests(unittest.TestCase):
                         expect(page.locator('#result-rows .case-row')).to_contain_text('2/2개 현재 평가')
                         expect(page.locator('#result-rows .case-details')).to_be_visible()
                         expect(page.locator('#result-rows')).to_contain_text('3.00 / 3')
+                        expect(page.locator('#result-rows .quality-overview')).to_have_count(2)
+                        expect(page.locator('#result-rows .quality-overview .quality-axis')).to_have_count(10)
+                        expect(page.locator('#result-rows')).to_contain_text('모델 품질 분석')
                         page.locator('[data-history]').first.click()
                         expect(page.locator('#history-dialog')).to_be_visible()
                         expect(page.locator('#history-content')).to_contain_text(rubric.VERSION)
+                        expect(page.locator('#history-content .quality-axis')).to_have_count(5)
                         page.locator('#close-history').click()
                         page.locator('[data-settings]').click()
                         page.locator('#edit-spec').get_by_text('추가 평가 기준 (선택)',exact=True).click()

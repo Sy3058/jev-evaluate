@@ -128,7 +128,27 @@ def _download(url: str) -> tuple[int, str, bytes, str, bool]:
         connection.close()
 
 
-def verify_url(url: str) -> dict:
+def _focused_excerpt(visible: str, focus: str, limit: int = MAX_EXCERPT) -> str:
+    if len(visible) <= limit or not focus:
+        return visible[:limit]
+    terms = {term.lower() for term in re.findall(r"[가-힣A-Za-z0-9]{3,}", focus) if len(term) >= 3}
+    if not terms:
+        return visible[:limit]
+    lower = visible.lower()
+    positions = {0}
+    for term in terms:
+        start = 0
+        for _ in range(8):
+            found = lower.find(term, start)
+            if found < 0:
+                break
+            positions.add(max(0, found - limit // 3))
+            start = found + len(term)
+    best = max(positions, key=lambda pos: sum(lower[pos:pos + limit].count(term) for term in terms))
+    return visible[best:best + limit]
+
+
+def verify_url(url: str, focus: str = "") -> dict:
     checked_at = datetime.now(UTC).isoformat()
     result = {"url": url, "checkerVersion": CACHE_VERSION, "checkedAt": checked_at, "status": "unavailable",
               "httpStatus": None, "finalUrl": None, "contentType": None,
@@ -177,7 +197,8 @@ def verify_url(url: str) -> dict:
                 result.update({"status": "no_content", "reason": "읽을 수 있는 본문이 부족함"})
                 return result
             result["truncated"] = result["truncated"] or len(visible) > MAX_EXCERPT
-            result.update({"status": "verified", "title": title, "excerpt": visible[:MAX_EXCERPT],
+            result.update({"status": "verified", "title": title,
+                           "excerpt": _focused_excerpt(visible, focus),
                            "sha256": hashlib.sha256(body).hexdigest(),
                            "reason": "평가에 본문 일부만 전달됨" if result["truncated"] else None})
             return result
