@@ -156,10 +156,52 @@ class BrowserTests(unittest.TestCase):
                                     lowConfidenceFields:['relationConfidence']}]},
                             requirements:[],checks:[],issues:[],sourceMetadata:{}
                         })""")
-                        self.assertIn('선택 확신도 낮거나 없는 근거 대조 1개',fact_html)
-                        self.assertIn('판정 검토 필요',fact_html)
+                        self.assertIn('핵심 주장 모순',fact_html)
+                        self.assertIn('사실성 판정 검토 1개',fact_html)
+                        self.assertIn('사실성 판정 검토 필요',fact_html)
                         self.assertIn('관계 0.41',fact_html)
                         self.assertEqual(fact_html.count('확인한 원문'),1)
+                        self.assertNotIn('Truthfulness 근거 대조',fact_html)
+                        self.assertEqual(fact_html.count('Truthfulness:'),1)
+                        ordered_html=page.evaluate("""() => reportDetails({
+                            scoreType:'expected_level_0_3',
+                            axes:{truthfulness:{score:2,status:'rated',description:'근거 대조',
+                                scoringMethod:'confirmed_claim_contradictions',needsReview:true,notes:[]}},
+                            factVerification:{score:2,status:'rated',claimCount:3,verifiedCount:2,
+                                unverifiedCount:1,majorCount:0,minorCount:1,claims:[
+                                    {id:'C1',text:'정상 주장',importance:'HIGH',relation:'SUPPORTED',sourceRef:'E1',sourceText:'정상 근거'},
+                                    {id:'C2',text:'틀린 주장',importance:'LOW',relation:'CONTRADICTED',sourceRef:'E2',sourceText:'반박 근거'},
+                                    {id:'C3',text:'미확인 주장',importance:'HIGH',relation:'UNVERIFIED',sourceRef:'NONE'}]},
+                            requirements:[],checks:[],issues:[],sourceMetadata:{}
+                        })""")
+                        self.assertLess(ordered_html.index('틀린 주장'),ordered_html.index('정상 주장'))
+                        self.assertIn('검토가 필요한 주장 1개 보기',ordered_html)
+                        self.assertIn('나머지 주장 1개 보기',ordered_html)
+                        allocation_html=page.evaluate("""() => reportDetails({
+                            scoreType:'expected_level_0_3',
+                            axes:{truthfulness:{score:2,status:'rated',description:'근거 대조',
+                                scoringMethod:'confirmed_claim_contradictions',needsReview:true,notes:[]}},
+                            factVerification:{score:2,status:'rated',claimCount:2,verifiedCount:2,
+                                unverifiedCount:0,majorCount:0,minorCount:1,
+                                scoreAllocationReviewCount:1,factVerdictReviewCount:0,claims:[
+                                    {id:'C1',text:'일치 주장',importance:'HIGH',relation:'SUPPORTED',
+                                     sourceRef:'E1',sourceText:'일치 근거',importanceConfidence:.44,
+                                     relationConfidence:.99,sourceConfidence:1,lowConfidenceFields:[],
+                                     scoreAllocationReviewFields:[],factVerdictReviewFields:[]},
+                                    {id:'C2',text:'모순 주장',importance:'LOW',relation:'CONTRADICTED',
+                                     sourceRef:'E2',sourceText:'반박 근거',importanceConfidence:.51,
+                                     relationConfidence:.98,sourceConfidence:.99,
+                                     lowConfidenceFields:['importanceConfidence'],
+                                     scoreAllocationReviewFields:['importanceConfidence'],factVerdictReviewFields:[]}]},
+                            requirements:[],checks:[],issues:[],sourceMetadata:{}
+                        })""")
+                        self.assertIn('2 / 3 · 점수 배점 검토 필요',allocation_html)
+                        self.assertNotIn('사실성 판정 검토 필요',allocation_html)
+                        self.assertIn('나머지 주장 1개 보기',allocation_html)
+                        self.assertIn('이전 기준 검토 필요',page.evaluate("""() => axisCell(
+                            {score:3,scoringMethod:'confirmed_claim_contradictions',needsReview:true},
+                            'expected_level_0_3',
+                            {claims:[{relation:'SUPPORTED',lowConfidenceFields:['importanceConfidence']}]})"""))
                         unknown_html=page.evaluate("""() => reportDetails({
                             scoreType:'expected_level_0_3',
                             axes:{truthfulness:{score:null,status:'unverifiable',description:'판정 보류',
@@ -171,7 +213,7 @@ class BrowserTests(unittest.TestCase):
                                     importanceConfidence:.38,lowConfidenceFields:['importanceConfidence']}]},
                             requirements:[],checks:[],issues:[],sourceMetadata:{}
                         })""")
-                        self.assertIn('사실 주장 아님 판정의 확신도 낮음 1개',unknown_html)
+                        self.assertIn('사실 주장 여부 검토 1개',unknown_html)
                         expect(page.locator('#bot-select-wrap')).to_have_count(0)
                         page.get_by_role('button',name='AI Bot 평가').click()
                         expect(page.locator('#bot-select-wrap')).to_be_visible()

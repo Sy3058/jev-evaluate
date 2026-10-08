@@ -140,14 +140,22 @@ def score(rows: list[dict], skipped: int) -> dict:
     if not factual:
         for row in uncertain_excluded:
             row["lowConfidenceFields"] = ["importanceConfidence"]
-    uncertain = 0
+    allocation_review = 0
+    verdict_review = 0
     for row in factual:
-        row["lowConfidenceFields"] = (
-            [field for field in ("importanceConfidence", "relationConfidence", "sourceConfidence")
-             if row.get(field) is None or row[field] < MIN_FACT_CONFIDENCE]
-            if row["relation"] in {"SUPPORTED", "CONTRADICTED"} and
-            row.get("verificationMethod") != "exact_numeric_reference" else [])
-        uncertain += bool(row["lowConfidenceFields"])
+        checked = (row["relation"] in {"SUPPORTED", "CONTRADICTED"} and
+                   row.get("verificationMethod") != "exact_numeric_reference")
+        row["scoreAllocationReviewFields"] = (
+            ["importanceConfidence"] if checked and row["relation"] == "CONTRADICTED" and
+            (row.get("importanceConfidence") is None or
+             row["importanceConfidence"] < MIN_FACT_CONFIDENCE) else [])
+        row["factVerdictReviewFields"] = (
+            [field for field in ("relationConfidence", "sourceConfidence")
+             if row.get(field) is None or row[field] < MIN_FACT_CONFIDENCE] if checked else [])
+        row["lowConfidenceFields"] = (row["scoreAllocationReviewFields"] +
+                                      row["factVerdictReviewFields"])
+        allocation_review += bool(row["scoreAllocationReviewFields"])
+        verdict_review += bool(row["factVerdictReviewFields"])
     major = sum(row["importance"] == "HIGH" and row["relation"] == "CONTRADICTED" for row in factual)
     minor = sum(row["importance"] == "LOW" and row["relation"] == "CONTRADICTED" for row in factual)
     unresolved = sum(row["relation"] == "UNVERIFIED" for row in factual)
@@ -158,12 +166,14 @@ def score(rows: list[dict], skipped: int) -> dict:
     return {"score": value if verified else None, "status": status,
             "verifiedCount": verified, "claimCount": len(factual),
             "unverifiedCount": unresolved, "majorCount": major, "minorCount": minor,
-            "lowConfidenceVerifiedCount": uncertain,
+            "lowConfidenceVerifiedCount": sum(bool(row["lowConfidenceFields"]) for row in factual),
+            "scoreAllocationReviewCount": allocation_review,
+            "factVerdictReviewCount": verdict_review,
             "lowConfidenceExcludedCount": len(uncertain_excluded),
             "confidenceReviewThreshold": MIN_FACT_CONFIDENCE,
             "skippedCandidateCount": skipped,
             "claimSelection": "evenly_spaced" if skipped else "all_candidates",
             "verificationMode": "provided_evidence_only",
-            "needsReview": bool(unresolved or skipped or uncertain or
+            "needsReview": bool(unresolved or skipped or allocation_review or verdict_review or
                                 (not factual and uncertain_excluded)),
             "claims": rows}

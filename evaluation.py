@@ -15,7 +15,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 BASE_VERSION = "five-axis-v3-score"
-VERSION = "five-axis-v16-section-evidence"
+VERSION = "five-axis-v17-truth-review-reasons"
 CATEGORIES = ["코딩", "강의·첨부자료", "일반지식·설명", "추론·문제해결"]
 LABELS = {
     "instruction_following": "Instruction Following",

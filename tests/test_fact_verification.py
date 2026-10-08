@@ -100,11 +100,48 @@ class FactVerificationTests(unittest.TestCase):
         self.assertEqual(result['score'],1)
         self.assertEqual(result['lowConfidenceVerifiedCount'],1)
         self.assertEqual(rows[0]['lowConfidenceFields'],['relationConfidence'])
+        self.assertEqual(result['factVerdictReviewCount'],1)
+        self.assertEqual(result['scoreAllocationReviewCount'],0)
         self.assertTrue(result['needsReview'])
         raw['answers']['fact_relation_C1']['confidence']=.91
         stable=fact.score(fact.parse(raw,claims,{"E1":"무료 요금제는 파일 내보내기를 지원하지 않습니다."}), 0)
         self.assertEqual(stable['lowConfidenceVerifiedCount'],0)
         self.assertFalse(stable['needsReview'])
+
+    def test_low_importance_confidence_only_reviews_contradiction_allocation(self):
+        rows = [
+            {'id':'C1','text':'일치 주장','importance':'HIGH','relation':'SUPPORTED',
+             'sourceRef':'E1','importanceConfidence':.44,'relationConfidence':.99,'sourceConfidence':1.0},
+            {'id':'C2','text':'모순 주장','importance':'LOW','relation':'CONTRADICTED',
+             'sourceRef':'E2','importanceConfidence':.51,'relationConfidence':.98,'sourceConfidence':.99},
+        ]
+        report = fact.score(rows, 0)
+        self.assertEqual(report['score'], 2)
+        self.assertEqual(report['scoreAllocationReviewCount'], 1)
+        self.assertEqual(report['factVerdictReviewCount'], 0)
+        self.assertEqual(rows[0]['lowConfidenceFields'], [])
+        self.assertEqual(rows[1]['scoreAllocationReviewFields'], ['importanceConfidence'])
+        self.assertTrue(report['needsReview'])
+        supported_only = fact.score(rows[:1], 0)
+        self.assertEqual(supported_only['score'], 3)
+        self.assertFalse(supported_only['needsReview'])
+        rows[0]['relationConfidence'] = .42
+        uncertain_relation = fact.score(rows[:1], 0)
+        self.assertEqual(uncertain_relation['score'], 3)
+        self.assertEqual(uncertain_relation['scoreAllocationReviewCount'], 0)
+        self.assertEqual(uncertain_relation['factVerdictReviewCount'], 1)
+        self.assertTrue(uncertain_relation['needsReview'])
+
+    def test_allocation_and_fact_verdict_review_can_coexist(self):
+        rows = [{'id':'C1','text':'모순 주장','importance':'HIGH','relation':'CONTRADICTED',
+                 'sourceRef':'E1','importanceConfidence':.45,'relationConfidence':.40,
+                 'sourceConfidence':.93}]
+        report = fact.score(rows, 0)
+        self.assertEqual(report['score'], 1)
+        self.assertEqual(report['scoreAllocationReviewCount'], 1)
+        self.assertEqual(report['factVerdictReviewCount'], 1)
+        self.assertEqual(rows[0]['lowConfidenceFields'],
+                         ['importanceConfidence', 'relationConfidence'])
 
     def test_missing_confidence_is_reviewed_not_silently_trusted(self):
         claims={"C1":"출시일은 화요일입니다."}

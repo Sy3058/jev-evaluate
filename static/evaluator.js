@@ -54,7 +54,26 @@ function fillSpec(prefix,spec) {
   $(`#${prefix}-checks`).value=JSON.stringify(spec.checks || [],null,2);
   $(`#${prefix}-code-tests`).value=JSON.stringify(spec.codeTests || {},null,2);
 }
-function axisCell(axis, scoreType) { return !axis ? '—' : axis.score === null ? (axis.scoringMethod === 'confirmed_claim_contradictions' && axis.status === 'unverifiable' ? '미검증 · 검토 필요' : esc(statusNames[axis.status])) : `${scoreType === 'expected_level_0_3' && axis.scoringMethod !== 'confirmed_claim_contradictions' ? Number(axis.score).toFixed(2) : axis.score} / 3${axis.needsReview && (scoreType === 'violation_count_0_3' || axis.scoringMethod === 'confirmed_claim_contradictions') ? ' · 검토 필요' : ''}`; }
+function factReviewCounts(fact) {
+  const claims = fact?.claims || [];
+  return {
+    allocation: fact?.scoreAllocationReviewCount ?? claims.filter(c=>c.relation === 'CONTRADICTED' && c.lowConfidenceFields?.includes('importanceConfidence')).length,
+    verdict: fact?.factVerdictReviewCount ?? claims.filter(c=>c.lowConfidenceFields?.some(f=>f === 'relationConfidence' || f === 'sourceConfidence')).length
+  };
+}
+function axisCell(axis, scoreType, fact=null) {
+  if (!axis) return '—';
+  if (axis.score === null) return axis.scoringMethod === 'confirmed_claim_contradictions' && axis.status === 'unverifiable' ? '미검증 · 근거 확인 필요' : esc(statusNames[axis.status]);
+  const score = `${scoreType === 'expected_level_0_3' && axis.scoringMethod !== 'confirmed_claim_contradictions' ? Number(axis.score).toFixed(2) : axis.score} / 3`;
+  if (axis.scoringMethod === 'confirmed_claim_contradictions' && fact) {
+    const review = factReviewCounts(fact);
+    const labels = [review.allocation ? '점수 배점 검토 필요' : '', review.verdict ? '사실성 판정 검토 필요' : ''].filter(Boolean);
+    if (axis.needsReview && !labels.length) labels.push(
+      fact.scoreAllocationReviewCount === undefined ? '이전 기준 검토 필요' : '근거 확인 필요');
+    return `${score}${labels.length ? ` · ${labels.join(' · ')}` : ''}`;
+  }
+  return `${score}${axis.needsReview && scoreType === 'violation_count_0_3' ? ' · 검토 필요' : ''}`;
+}
 function issueEvidence(v) {
   if (v.requirementRef) return `<article class="issue-card linked-issue">
     <b>${esc(v.severity === 'major' ? '중대' : '경미')} · ${esc(v.label)}</b>
@@ -93,24 +112,48 @@ function qualityAxis(key, a, report) {
 }
 function modelQualityAxis(key, a, report, factDetails='') {
   const open = (a.score !== null && a.score < 2.5) || a.needsReview;
+  const fact = key === 'truthfulness' ? report.factVerification : null;
+  const majorCount = fact?.majorCount ?? (fact?.claims || []).filter(c=>c.relation === 'CONTRADICTED' && c.importance === 'HIGH').length;
+  const minorCount = fact?.minorCount ?? (fact?.claims || []).filter(c=>c.relation === 'CONTRADICTED' && c.importance === 'LOW').length;
+  const factSummary = fact ? a.score === null ? (fact.status === 'unverifiable' ? '근거 대조 불가' : '대조할 사실 주장 없음') : majorCount ? `핵심 주장 모순 ${majorCount}건` : minorCount ? `부수 주장 모순 ${minorCount}건` : '확인된 모순 없음' : a.description;
   const requirementDetails = key === 'instruction_following' && report.requirements?.length
     ? `<div class="bot-rules">${report.requirements.map(r=>`<article class="claim-card"><b>${esc(r.id)} · ${esc(requirementNames[r.status] || r.status)}</b><p>${esc(r.text)}</p></article>`).join('')}</div>` : '';
-  return `<details class="quality-axis" ${open ? 'open' : ''}><summary><b>${esc(config.criteria[key])}: ${axisCell(a, report.scoreType)}</b><span>${esc(a.description)}</span></summary>
-    ${a.scoringMethod === 'confirmed_claim_contradictions' ? '<p class="hint">근거와 모순으로 판정된 주장의 개수와 중요도로 계산한 정수 점수입니다. 미검증 주장은 감점하지 않습니다. 선택 확신도가 낮은 판정은 검토 필요로 표시합니다.</p>' : `<p>JEV 확신도: ${typeof a.confidence === 'number' ? a.confidence.toFixed(2) : '미제공'} (정확도 보장 아님)</p>`}
+  return `<details class="quality-axis" ${open ? 'open' : ''}><summary><b>${esc(config.criteria[key])}: ${axisCell(a, report.scoreType, fact)}</b><span>${esc(factSummary)}</span></summary>
+    ${fact ? '' : a.scoringMethod === 'confirmed_claim_contradictions' ? '<p class="hint">근거와 모순으로 판정된 주장의 개수와 중요도로 계산한 정수 점수입니다. 미검증 주장은 감점하지 않습니다. 선택 확신도가 낮은 판정은 검토 필요로 표시합니다.</p>' : `<p>JEV 확신도: ${typeof a.confidence === 'number' ? a.confidence.toFixed(2) : '미제공'} (정확도 보장 아님)</p>`}
     ${report.scoreType === 'expected_level_0_3' && a.status === 'rated' && a.probabilities ? `<p>단계별 확률: ${[0,1,2,3].map(n=>`${n}점 ${((a.probabilities[String(n)] || 0)*100).toFixed(1)}%`).join(' · ')}</p><p class="hint">점수는 단계별 확률의 가중 평균입니다. 표시된 설명은 가장 가능성 높은 단계 기준입니다.</p>` : ''}
     ${key === 'truthfulness' && report.factVerification ? '' : a.answerText ? `<div class="linked-evidence"><div><strong>답변 · ${esc(a.answerRef)}</strong><p>${esc(a.answerText)}</p></div>${a.sourceText ? `<div><strong>근거 · ${esc(a.sourceRef)}</strong><p>${esc(a.sourceText)}</p></div>` : ''}</div>` : a.sourceText ? `<p>근거 ${esc(a.sourceRef)}: ${esc(a.sourceText)}</p>` : ''}
-    ${a.notes?.map(n=>`<p class="hint">${esc(n)}</p>`).join('') || ''}${requirementDetails}${factDetails}
+    ${fact ? '' : a.notes?.map(n=>`<p class="hint">${esc(n)}</p>`).join('') || ''}${requirementDetails}${factDetails}
   </details>`;
+}
+function factClaimCard(c, issue=false) {
+  const label = c.relation === 'CONTRADICTED' ? '근거와 모순' : c.relation === 'UNVERIFIED' ? '미검증' : c.relation === 'SUPPORTED' ? '근거와 일치' : '사실 주장 아님';
+  const allocationReview = c.scoreAllocationReviewFields?.length ?? (c.relation === 'CONTRADICTED' && c.lowConfidenceFields?.includes('importanceConfidence'));
+  const verdictReview = c.factVerdictReviewFields?.length ?? c.lowConfidenceFields?.some(f=>f === 'relationConfidence' || f === 'sourceConfidence');
+  return `<article class="${issue ? 'issue-card' : 'claim-card'}"><b>${esc(c.id)} · ${label}${c.importance === 'HIGH' ? ' · 핵심' : ''}${allocationReview ? ' · 점수 배점 검토 필요' : ''}${verdictReview ? ' · 사실성 판정 검토 필요' : ''}</b>
+    <div class="issue-pointers"><span>답변 ${esc(c.id)}</span>${c.sourceRef && c.sourceRef !== 'NONE' ? `<span>근거 ${esc(c.sourceRef)}</span>` : ''}</div>
+    <div class="linked-evidence"><div><strong>답변 주장</strong><p>${esc(c.text)}</p></div>${c.sourceRef && c.sourceRef !== 'NONE' ? `<div><strong>등록 근거</strong><p>${esc(c.sourceText || '')}</p></div>` : ''}</div>
+    ${allocationReview ? '<p class="hint">JEV가 선택한 HIGH/LOW 중요도로 점수를 계산했습니다. 중요도 선택의 확신도가 낮아 배점 검토가 필요합니다.</p>' : ''}
+    ${verdictReview ? '<p class="hint">JEV가 선택한 일치·모순 관계로 점수를 계산했습니다. 관계 또는 근거 선택의 확신도가 낮아 사실성 판정 검토가 필요합니다.</p>' : ''}
+    ${c.relation !== 'NOT_APPLICABLE' ? `<details><summary>판정 정보 보기</summary><p class="hint">JEV 선택 확신도 · 중요도 ${typeof c.importanceConfidence === 'number' ? c.importanceConfidence.toFixed(2) : '미제공'} · 관계 ${typeof c.relationConfidence === 'number' ? c.relationConfidence.toFixed(2) : '미제공'} · 근거 ${typeof c.sourceConfidence === 'number' ? c.sourceConfidence.toFixed(2) : '미제공'}</p>${c.verificationMethod === 'exact_numeric_reference' ? '<p class="hint">등록된 기준 답안과 숫자를 직접 비교했습니다.</p>' : ''}</details>` : ''}
+  </article>`;
 }
 function reportDetails(report, botMode=false) {
   if (!report) return '';
   const fact = report.factVerification;
-  const factNames = {SUPPORTED:'근거와 일치',CONTRADICTED:'근거와 모순',UNVERIFIED:'미검증',NOT_APPLICABLE:'사실 주장 아님'};
-  const factDetails = fact ? `<section class="claim-card"><b>Truthfulness 근거 대조 · ${fact.score === null ? (fact.claimCount ? '미검증 · 점수 없음' : esc(statusNames[fact.status] || '판정 불가')) : `${fact.score} / 3점`}</b>
-    <p>추출된 사실 주장 ${fact.claimCount}개 중 ${fact.verifiedCount}개 대조 · 미검증 ${fact.unverifiedCount}개${fact.citedEvidenceReviewCount ? ` · 출처 신뢰성 검토 ${fact.citedEvidenceReviewCount}개` : ''}${fact.lowConfidenceVerifiedCount ? ` · 선택 확신도 낮거나 없는 근거 대조 ${fact.lowConfidenceVerifiedCount}개` : ''}${!fact.claimCount && fact.lowConfidenceExcludedCount ? ` · 사실 주장 아님 판정의 확신도 낮음 ${fact.lowConfidenceExcludedCount}개` : ''}${fact.skippedCandidateCount ? ` · 답변 전체에서 고르게 추린 뒤 검사 상한 밖에 남은 후보 ${fact.skippedCandidateCount}개` : ''}${fact.needsReview ? ' · 검토 필요' : ''}</p>
+  const claims = fact?.claims || [];
+  const factReview = factReviewCounts(fact);
+  const contradictions = claims.filter(c=>c.relation === 'CONTRADICTED');
+  const reviewClaims = claims.filter(c=>c.relation !== 'CONTRADICTED' &&
+    (c.relation === 'UNVERIFIED' || c.factVerdictReviewFields?.length ||
+     c.lowConfidenceFields?.some(f=>f === 'relationConfidence' || f === 'sourceConfidence')));
+  const otherClaims = claims.filter(c=>c.relation !== 'CONTRADICTED' && !reviewClaims.includes(c));
+  const factDetails = fact ? `<section class="fact-details">
+    <p>사실 주장 ${fact.claimCount}개 중 ${fact.verifiedCount}개 대조 · 모순 ${contradictions.length}개 · 미검증 ${fact.unverifiedCount}개${factReview.allocation ? ` · 점수 배점 검토 ${factReview.allocation}개` : ''}${factReview.verdict ? ` · 사실성 판정 검토 ${factReview.verdict}개` : ''}${fact.lowConfidenceExcludedCount ? ` · 사실 주장 여부 검토 ${fact.lowConfidenceExcludedCount}개` : ''}${fact.citedEvidenceReviewCount ? ` · 출처 신뢰성 검토 ${fact.citedEvidenceReviewCount}개` : ''}${fact.skippedCandidateCount ? ` · 검사 제외 후보 ${fact.skippedCandidateCount}개` : ''}</p>
     ${fact.extractionIssue ? `<p class="issue-warning">${esc(fact.extractionIssue)}</p>` : ''}
-    <p class="hint">직접 대조된 사실 주장이 없으면 점수를 보류합니다. 점수가 있으면 확인된 모순의 개수와 중요도로 계산하며, 미검증 주장은 감점하지 않습니다. 3점은 모든 사실이 확인됐다는 뜻이 아닙니다.</p>
-    ${fact.claims.map(c=>`<article class="claim-card"><b>${esc(c.id)} · ${esc(factNames[c.relation] || c.relation)}${c.importance === 'HIGH' ? ' · 핵심' : ''}${c.lowConfidenceFields?.length ? ' · 판정 검토 필요' : ''}</b><p>${esc(c.text)}</p>${c.sourceRef !== 'NONE' ? `<p>근거 ${esc(c.sourceRef)}: ${esc(c.sourceText || '')}</p>` : ''}${c.relation !== 'NOT_APPLICABLE' ? `<p class="hint">JEV 선택 확신도 · 중요도 ${typeof c.importanceConfidence === 'number' ? c.importanceConfidence.toFixed(2) : '미제공'} · 관계 ${typeof c.relationConfidence === 'number' ? c.relationConfidence.toFixed(2) : '미제공'} · 근거 ${typeof c.sourceConfidence === 'number' ? c.sourceConfidence.toFixed(2) : '미제공'}</p>` : ''}${c.verificationMethod === 'exact_numeric_reference' ? '<p class="hint">등록된 기준 답안과 숫자를 직접 비교했습니다.</p>' : ''}</article>`).join('')}
+    ${contradictions.map(c=>factClaimCard(c,true)).join('')}
+    ${reviewClaims.length ? `<details><summary>검토가 필요한 주장 ${reviewClaims.length}개 보기</summary>${reviewClaims.map(c=>factClaimCard(c)).join('')}</details>` : ''}
+    ${otherClaims.length ? `<details><summary>나머지 주장 ${otherClaims.length}개 보기</summary>${otherClaims.map(c=>factClaimCard(c)).join('')}</details>` : ''}
+    ${fact.score !== null && (fact.unverifiedCount || fact.skippedCandidateCount) ? '<p class="hint">미검증 주장은 감점하지 않았습니다. 현재 점수는 답변 전체의 사실성을 보증하지 않습니다.</p>' : ''}
     </section>` : '';
   const axes = Object.entries(report.axes).map(([key,a])=>report.scoreType === 'violation_count_0_3'
     ? qualityAxis(key,a,report) : modelQualityAxis(key,a,report,key === 'truthfulness' ? factDetails : '')).join('');
@@ -174,7 +217,7 @@ function render() {
     const open=expandedCases.has(caseId);
     const modelRows=responses.map(i=>{
       const axes=i.report?.axes;
-      return `<tr><td class="model">${esc(i.model)}</td><td>${esc(resultStatus(i))}</td>${Object.keys(config.criteria).map(k=>`<td>${axisCell(axes?.[k], i.report?.scoreType)}</td>`).join('')}
+      return `<tr><td class="model">${esc(i.model)}</td><td>${esc(resultStatus(i))}</td>${Object.keys(config.criteria).map(k=>`<td>${axisCell(axes?.[k], i.report?.scoreType, k === 'truthfulness' ? i.report?.factVerification : null)}</td>`).join('')}
         <td><button data-evaluate="${i.responseId}">변경분 평가</button><button data-force-evaluate="${i.responseId}">강제 재평가</button><button data-history="${i.responseId}">이력</button><label class="file-action">${i.artifact ? '파일 교체' : '파일 추가'}<input type="file" data-upload-for="${i.responseId}" accept=".html,.htm,.pdf,.xlsx" hidden></label></td></tr>
         <tr class="model-evidence"><td colspan="8"><small>${esc(i.rubricVersion || config.rubricVersion)} / ${esc(i.evaluatorModel || '')}</small>
         ${i.artifact ? `<p>생성 파일: <a href="${esc(i.artifact.downloadUrl)}">${esc(i.artifact.filename)}</a> · ${esc(i.artifact.format.toUpperCase())} · ${Math.ceil(i.artifact.size/1024)}KB${i.artifact.textTruncated ? ' · 내용 일부만 추출' : ''}${i.artifact.extractionNote ? ` · ${esc(i.artifact.extractionNote)}` : ''}</p>` : '<p>생성 파일 없음</p>'}

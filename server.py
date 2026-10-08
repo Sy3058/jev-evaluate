@@ -1006,8 +1006,10 @@ class AppHandler(SimpleHTTPRequestHandler):
                                         ["미검증 주장은 감점하지 않았습니다."] if fact_report["unverifiedCount"] else []) +
                                        ([f"답변 인용 링크의 본문으로 대조한 주장 {cited_count}개는 출처의 신뢰성이 별도 확인되지 않아 검토 필요로 표시했습니다."]
                                         if cited_count else []) +
-                                       ([f"근거 대조 판정의 선택 확신도가 낮거나 없는 주장 {fact_report['lowConfidenceVerifiedCount']}개는 점수를 유지하고 검토 필요로 표시했습니다."]
-                                        if fact_report["lowConfidenceVerifiedCount"] else []))})
+                                       ([f"모순 주장의 HIGH/LOW 중요도 선택 확신도가 낮거나 없는 주장 {fact_report['scoreAllocationReviewCount']}개는 선택한 중요도로 점수를 계산했으며 배점 검토가 필요합니다."]
+                                        if fact_report["scoreAllocationReviewCount"] else []) +
+                                       ([f"일치·모순 관계나 근거 선택 확신도가 낮거나 없는 주장 {fact_report['factVerdictReviewCount']}개는 선택한 관계로 점수를 계산했으며 사실성 판정 검토가 필요합니다."]
+                                        if fact_report["factVerdictReviewCount"] else []))})
                 report["issues"] = [issue for issue in report["issues"]
                                     if issue != "일부 축에 근거 부족 또는 검토 필요"]
                 if any(item["needsReview"] for item in report["axes"].values()):
