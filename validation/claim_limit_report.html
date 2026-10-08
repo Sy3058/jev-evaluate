@@ -1,0 +1,208 @@
+<!doctype html><html lang='ko'><meta charset='utf-8'><title>후보 상한 실험</title>
+<style>body{font:15px/1.6 sans-serif;max-width:1400px;margin:30px auto;padding:0 20px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:8px;text-align:left}pre{white-space:pre-wrap;background:#eee;padding:12px}small{color:#555}</style>
+<h1>Truthfulness 후보 상한 합성 실험</h1><p>예제 72개, 실제 평가 실행 96건. 기대 판정은 작성된 합성 정답이며 독립적인 사람 검증이 아닙니다.</p><table><tr><th>상한</th><th>합성 오류 후보 선택률</th><th>실호출 성공/첫 실행</th><th>실평가 오류 탐지</th><th>선택됐으나 놓친 오류</th><th>잘못된 모순</th><th>3점·검토 필요</th><th>중앙 시간(초)</th><th>전체 실패/실행</th><th>첫 실행 사용량</th></tr><tr><td>10</td><td>54/72 (75.0%)</td><td>16/16</td><td>10/15</td><td>0</td><td>0</td><td>3</td><td>0.25</td><td>0/24</td><td>{&quot;input_tokens&quot;: 119746, &quot;output_tokens&quot;: 23476}</td></tr><tr><td>20</td><td>60/72 (83.3%)</td><td>16/16</td><td>11/15</td><td>0</td><td>0</td><td>2</td><td>0.27</td><td>0/24</td><td>{&quot;input_tokens&quot;: 205937, &quot;output_tokens&quot;: 44862}</td></tr><tr><td>40</td><td>66/72 (91.7%)</td><td>16/16</td><td>14/15</td><td>0</td><td>0</td><td>0</td><td>0.33</td><td>0/24</td><td>{&quot;input_tokens&quot;: 343937, &quot;output_tokens&quot;: 79774}</td></tr><tr><td>all</td><td>72/72 (100.0%)</td><td>16/16</td><td>15/15</td><td>0</td><td>0</td><td>0</td><td>0.35</td><td>0/24</td><td>{&quot;input_tokens&quot;: 450772, &quot;output_tokens&quot;: 108416}</td></tr></table><h2>실험 조건</h2><p>문장 후보 10·20·40·80개, 일반 텍스트·Markdown 표·브라우저에서 관측한 HTML 본문. 정상·단일 오류(앞/중간/끝)·복수 오류·바꿔쓰기/권고. 후보 선택은 현재 앱의 균등 선택 함수를 그대로 사용합니다. C번호 대신 원래 예제의 F번호로 판정을 비교합니다.</p><p>상한별 첫 실행만 탐지 정확도에 사용하고 경계 사례의 3회 실행은 안정성에 별도 사용합니다. 선택 누락은 Jev 판단 오류에 포함하지 않습니다. 전체 검사에서도 후보 추출 방식 자체의 누락 가능성은 남습니다.</p><p>처음 로컬 소켓 권한으로 막힌 1회는 기록을 보존하고 네트워크 권한 승인 후 재실행했습니다. 최종 성공/실패 집계는 각 조건의 마지막 실행을 사용하며, 환경 차단은 모델 판단 실패로 계산하지 않습니다.</p><h2>관찰 결과와 권고</h2><p><strong>이 합성 실험에서는 검사 범위 확대가 유리했습니다.</strong> 20개 제한은 실제 평가용 예제의 오류 15개 중 11개를 검사했고, 11개를 발견했습니다. 전체 검사는 15개 중 15개를 발견했습니다. 균등 표본 20개를 긴 리포트의 최종 점수 근거로 삼는 방식은 재검토하는 것을 권고합니다.</p><p>20개 조건의 오류 답변 2개는 모순을 찾지 못해 3점이면서 검토 필요로 남았습니다. 3점·검토 없음으로 통과한 오류 답변은 0개였습니다. 상한 밖 후보가 있으면 자동으로 검토 표시가 붙는 구현의 영향이므로 검토 표시만으로 오류 탐지 성공이라고 간주하면 안 됩니다.</p><p>전체 검사는 이번 80문장 이하·최대 8개 근거 절에서 단일 요청으로 성공했습니다. 이 규모에서는 제한을 늘렸을 때 속도보다 토큰 사용량 증가가 주요 비용이었습니다. 다만 한 가지 가상 영역의 명확한 사실만 사용했고 요청 순서도 고정돼 있으므로 80개 또는 무제한이 업무 전반의 최적 상한이라고 확정할 수 없습니다.</p><p><strong>다음 검증:</strong> 실제 긴 답변에서 전체 검사와 20개 균등 선택을 비교하고, 사람이 중요 오류를 먼저 표시해야 합니다. 자료가 더 길거나 근거 절 수가 많아 요청 한도를 넘으면 전체 후보를 여러 요청으로 나누는 방식도 별도 비교해야 합니다. 숫자·날짜만 우선 선택하는 방식은 의미·귀속 오류를 놓칠 수 있어 현재 증거만으로 채택하지 않습니다.</p><h2>반복 안정성과 검토 부담</h2><table><tr><th>상한</th><th>3점·검토 없음 오류 답변</th><th>정상 답변의 검토 표시</th><th>반복 판정 변동 사례</th><th>P95 시간(초)</th><th>근거 절 연결 일치율</th></tr><tr><td>10</td><td>0</td><td>4/5</td><td>없음</td><td>0.286</td><td>100.0%</td></tr><tr><td>20</td><td>0</td><td>3/5</td><td>없음</td><td>0.292</td><td>100.0%</td></tr><tr><td>40</td><td>0</td><td>2/5</td><td>없음</td><td>0.386</td><td>99.6%</td></tr><tr><td>all</td><td>0</td><td>2/5</td><td>없음</td><td>0.589</td><td>98.8%</td></tr></table><h2>근거 연결 오류의 구체적 확인</h2><p>관계 판정(일치/모순)이 정답과 같아도 선택한 근거 절이 틀릴 수 있습니다. 따라서 관계 판정 일치율을 근거까지 정확한 평가라고 해석할 수 없습니다. 전체 검사 권고에도 근거 연결 검증이 함께 필요합니다.</p><p>상한 10: 잘못된 근거 연결 0건, 그중 검토 표시 없는 연결 0건.</p><p>상한 20: 잘못된 근거 연결 0건, 그중 검토 표시 없는 연결 0건.</p><p>상한 40: 잘못된 근거 연결 2건, 그중 검토 표시 없는 연결 0건.</p><p>상한 all: 잘못된 근거 연결 8건, 그중 검토 표시 없는 연결 4건.</p><details><summary>정상 답변의 검토 사유: 후보 누락과 근거 판정 불확실성</summary><pre>[
+  {
+    &quot;cap&quot;: 10,
+    &quot;case&quot;: &quot;20-html-paraphrase&quot;,
+    &quot;skipped&quot;: 10,
+    &quot;claims&quot;: []
+  },
+  {
+    &quot;cap&quot;: 10,
+    &quot;case&quot;: &quot;40-markdown-normal&quot;,
+    &quot;skipped&quot;: 30,
+    &quot;claims&quot;: []
+  },
+  {
+    &quot;cap&quot;: 10,
+    &quot;case&quot;: &quot;40-html-paraphrase&quot;,
+    &quot;skipped&quot;: 30,
+    &quot;claims&quot;: []
+  },
+  {
+    &quot;cap&quot;: 10,
+    &quot;case&quot;: &quot;80-html-normal&quot;,
+    &quot;skipped&quot;: 70,
+    &quot;claims&quot;: []
+  },
+  {
+    &quot;cap&quot;: 20,
+    &quot;case&quot;: &quot;40-markdown-normal&quot;,
+    &quot;skipped&quot;: 20,
+    &quot;claims&quot;: []
+  },
+  {
+    &quot;cap&quot;: 20,
+    &quot;case&quot;: &quot;40-html-paraphrase&quot;,
+    &quot;skipped&quot;: 20,
+    &quot;claims&quot;: []
+  },
+  {
+    &quot;cap&quot;: 20,
+    &quot;case&quot;: &quot;80-html-normal&quot;,
+    &quot;skipped&quot;: 60,
+    &quot;claims&quot;: []
+  },
+  {
+    &quot;cap&quot;: 40,
+    &quot;case&quot;: &quot;40-markdown-normal&quot;,
+    &quot;skipped&quot;: 0,
+    &quot;claims&quot;: [
+      {
+        &quot;goldId&quot;: &quot;F008&quot;,
+        &quot;fields&quot;: [
+          &quot;sourceConfidence&quot;
+        ]
+      }
+    ]
+  },
+  {
+    &quot;cap&quot;: 40,
+    &quot;case&quot;: &quot;80-html-normal&quot;,
+    &quot;skipped&quot;: 40,
+    &quot;claims&quot;: []
+  },
+  {
+    &quot;cap&quot;: &quot;all&quot;,
+    &quot;case&quot;: &quot;40-markdown-normal&quot;,
+    &quot;skipped&quot;: 0,
+    &quot;claims&quot;: [
+      {
+        &quot;goldId&quot;: &quot;F008&quot;,
+        &quot;fields&quot;: [
+          &quot;sourceConfidence&quot;
+        ]
+      }
+    ]
+  },
+  {
+    &quot;cap&quot;: &quot;all&quot;,
+    &quot;case&quot;: &quot;80-html-normal&quot;,
+    &quot;skipped&quot;: 0,
+    &quot;claims&quot;: [
+      {
+        &quot;goldId&quot;: &quot;F027&quot;,
+        &quot;fields&quot;: [
+          &quot;sourceConfidence&quot;
+        ]
+      },
+      {
+        &quot;goldId&quot;: &quot;F028&quot;,
+        &quot;fields&quot;: [
+          &quot;sourceConfidence&quot;
+        ]
+      }
+    ]
+  }
+]</pre></details><details><summary>잘못된 근거 연결 원시 판정</summary><pre>[
+  {
+    &quot;cap&quot;: 40,
+    &quot;case&quot;: &quot;40-text-first&quot;,
+    &quot;goldId&quot;: &quot;F008&quot;,
+    &quot;expectedSource&quot;: &quot;E1&quot;,
+    &quot;selectedSource&quot;: &quot;E2&quot;,
+    &quot;confidence&quot;: 0.5,
+    &quot;flagged&quot;: true
+  },
+  {
+    &quot;cap&quot;: 40,
+    &quot;case&quot;: &quot;40-markdown-normal&quot;,
+    &quot;goldId&quot;: &quot;F008&quot;,
+    &quot;expectedSource&quot;: &quot;E1&quot;,
+    &quot;selectedSource&quot;: &quot;E2&quot;,
+    &quot;confidence&quot;: 0.41,
+    &quot;flagged&quot;: true
+  },
+  {
+    &quot;cap&quot;: &quot;all&quot;,
+    &quot;case&quot;: &quot;40-text-first&quot;,
+    &quot;goldId&quot;: &quot;F008&quot;,
+    &quot;expectedSource&quot;: &quot;E1&quot;,
+    &quot;selectedSource&quot;: &quot;E2&quot;,
+    &quot;confidence&quot;: 0.49,
+    &quot;flagged&quot;: true
+  },
+  {
+    &quot;cap&quot;: &quot;all&quot;,
+    &quot;case&quot;: &quot;80-text-first&quot;,
+    &quot;goldId&quot;: &quot;F025&quot;,
+    &quot;expectedSource&quot;: &quot;E3&quot;,
+    &quot;selectedSource&quot;: &quot;E5&quot;,
+    &quot;confidence&quot;: 1.0,
+    &quot;flagged&quot;: false
+  },
+  {
+    &quot;cap&quot;: &quot;all&quot;,
+    &quot;case&quot;: &quot;80-text-first&quot;,
+    &quot;goldId&quot;: &quot;F028&quot;,
+    &quot;expectedSource&quot;: &quot;E3&quot;,
+    &quot;selectedSource&quot;: &quot;E5&quot;,
+    &quot;confidence&quot;: 0.35,
+    &quot;flagged&quot;: true
+  },
+  {
+    &quot;cap&quot;: &quot;all&quot;,
+    &quot;case&quot;: &quot;80-text-last&quot;,
+    &quot;goldId&quot;: &quot;F008&quot;,
+    &quot;expectedSource&quot;: &quot;E1&quot;,
+    &quot;selectedSource&quot;: &quot;E2&quot;,
+    &quot;confidence&quot;: 0.65,
+    &quot;flagged&quot;: true
+  },
+  {
+    &quot;cap&quot;: &quot;all&quot;,
+    &quot;case&quot;: &quot;80-text-last&quot;,
+    &quot;goldId&quot;: &quot;F025&quot;,
+    &quot;expectedSource&quot;: &quot;E3&quot;,
+    &quot;selectedSource&quot;: &quot;E5&quot;,
+    &quot;confidence&quot;: 0.92,
+    &quot;flagged&quot;: false
+  },
+  {
+    &quot;cap&quot;: &quot;all&quot;,
+    &quot;case&quot;: &quot;80-text-multiple&quot;,
+    &quot;goldId&quot;: &quot;F025&quot;,
+    &quot;expectedSource&quot;: &quot;E3&quot;,
+    &quot;selectedSource&quot;: &quot;E5&quot;,
+    &quot;confidence&quot;: 0.99,
+    &quot;flagged&quot;: false
+  },
+  {
+    &quot;cap&quot;: &quot;all&quot;,
+    &quot;case&quot;: &quot;80-html-normal&quot;,
+    &quot;goldId&quot;: &quot;F025&quot;,
+    &quot;expectedSource&quot;: &quot;E3&quot;,
+    &quot;selectedSource&quot;: &quot;E5&quot;,
+    &quot;confidence&quot;: 0.99,
+    &quot;flagged&quot;: false
+  },
+  {
+    &quot;cap&quot;: &quot;all&quot;,
+    &quot;case&quot;: &quot;80-html-normal&quot;,
+    &quot;goldId&quot;: &quot;F028&quot;,
+    &quot;expectedSource&quot;: &quot;E3&quot;,
+    &quot;selectedSource&quot;: &quot;E8&quot;,
+    &quot;confidence&quot;: 0.64,
+    &quot;flagged&quot;: true
+  }
+]</pre></details><h2>길이·형식별 후보 선택 누락</h2><table><tr><th>구분</th><th>10개</th><th>20개</th><th>40개</th><th>전체</th></tr><tr><td>length: 10</td><td>0/18</td><td>0/18</td><td>0/18</td><td>0/18</td></tr><tr><td>length: 20</td><td>6/18</td><td>0/18</td><td>0/18</td><td>0/18</td></tr><tr><td>length: 40</td><td>6/18</td><td>6/18</td><td>0/18</td><td>0/18</td></tr><tr><td>length: 80</td><td>6/18</td><td>6/18</td><td>6/18</td><td>0/18</td></tr><tr><td>format: text</td><td>6/24</td><td>4/24</td><td>2/24</td><td>0/24</td></tr><tr><td>format: markdown</td><td>6/24</td><td>4/24</td><td>2/24</td><td>0/24</td></tr><tr><td>format: html</td><td>6/24</td><td>4/24</td><td>2/24</td><td>0/24</td></tr></table><p>표는 누락한 오류/전체 오류이며 실제 Jev 호출이 아닌 후보 선택 단계 72개 예제의 결과입니다.</p><h2>실행 방법</h2><pre>.\.venv\Scripts\python.exe validation/claim_limit_experiment.py --output data/claim-limit --offline
+.\.venv\Scripts\python.exe validation/claim_limit_experiment.py --output data/claim-limit --live
+.\.venv\Scripts\python.exe validation/claim_limit_experiment.py --output data/claim-limit --report</pre><p>live.jsonl의 완료된 실행은 재개 시 건너뜁니다. 실패도 자동 재실행하지 않습니다. 다른 모델·배치 크기·수정된 예제 비교에는 새 출력 폴더를 사용합니다. API 키는 .env의 TYPESAFE_API_KEY에서 읽으며 결과에 저장하지 않습니다.</p><h2>실패 기록</h2><pre>[]</pre><h2>검증 범위</h2><p>표의 시간과 사용량은 Truthfulness 질문 평가에 한정됩니다. 긴 실제 업무 문서, AI Bot의 다른 평가 축, 출처 수집 시간은 포함하지 않습니다. 사용량은 API 반환값 그대로 집계하며 금액으로 환산하지 않습니다. 원문에서 문장 후보를 추리는 단계의 누락은 별도 위험으로 남습니다. 예제의 기대 판정은 수정에 사용한 합성 정답이며 독립적인 홀드아웃 검증으로 해석하지 않습니다.</p><h2>실행 감사와 식별 정보</h2><pre>{
+  &quot;rubricVersion&quot;: &quot;five-axis-v17-truth-review-reasons&quot;,
+  &quot;fixtureHash&quot;: &quot;db3a4fd9c5973cc15e77b54c223644dafdcb12dd74b8b4972c31a571fccf63c3&quot;,
+  &quot;audit&quot;: {
+    &quot;expectedJobs&quot;: 96,
+    &quot;missingJobs&quot;: [],
+    &quot;failedJobs&quot;: 0,
+    &quot;unexpectedCandidates&quot;: 0,
+    &quot;fullSelectionMissingGold&quot;: 0,
+    &quot;returnedModels&quot;: [
+      &quot;jev-1.13.0&quot;
+    ],
+    &quot;callsMissingUsage&quot;: 0
+  },
+  &quot;totalUsageIncludingRepeats&quot;: {
+    &quot;output_tokens&quot;: 406528,
+    &quot;input_tokens&quot;: 1770098
+  }
+}</pre></html>

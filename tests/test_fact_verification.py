@@ -26,13 +26,29 @@ class FactVerificationTests(unittest.TestCase):
         self.assertEqual(fact.score(rows, 0)["score"], 1)
 
     def test_long_answer_samples_beginning_middle_and_end(self):
-        answer="\n".join(f"주장 {i}입니다." for i in range(1, 41))
+        answer="\n".join(f"주장 {i}입니다." for i in range(1, 161))
         claims, skipped=fact.candidates(answer)
-        self.assertEqual((len(claims), skipped), (fact.MAX_CLAIMS, 20))
+        self.assertEqual((len(claims), skipped), (80, 80))
         self.assertEqual(claims['C1'], '주장 1입니다.')
-        self.assertEqual(claims['C20'], '주장 40입니다.')
+        self.assertEqual(claims['C80'], '주장 160입니다.')
         self.assertTrue(any(text in claims.values() for text in
-                            ('주장 19입니다.', '주장 20입니다.', '주장 21입니다.', '주장 22입니다.')))
+                            ('주장 79입니다.', '주장 80입니다.', '주장 81입니다.', '주장 82입니다.')))
+
+    def test_eighty_candidates_are_all_retained(self):
+        lines = [f"주장 {i}입니다." for i in range(1, 81)]
+        claims, skipped = fact.candidates("\n".join(lines))
+        self.assertEqual(list(claims.values()), lines)
+        self.assertEqual(skipped, 0)
+
+    def test_claim_limit_change_invalidates_model_evaluation_cache(self):
+        from unittest.mock import patch
+        from server import evaluation_fingerprint
+        case = {"category": "일반지식", "evaluation_mode": "model"}
+        response = {"content": "답변", "model": "test"}
+        with patch.object(fact, "MAX_CLAIMS", 20):
+            previous = evaluation_fingerprint(case, response, None, {}, "jev")
+        current = evaluation_fingerprint(case, response, None, {}, "jev")
+        self.assertNotEqual(previous, current)
 
     def test_unchecked_candidates_prevent_not_applicable_verdict(self):
         rows=[{"id": "C1", "text": "다음에는 토론을 권장합니다.", "importance": "NONE",
