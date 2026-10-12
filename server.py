@@ -147,6 +147,35 @@ def web_evidence_expired(report: dict, evaluated_at: str) -> bool:
     return age >= timedelta(days=1) or age < timedelta(0)
 
 
+def evaluation_stale_reasons(report: dict, case: dict, response: dict,
+                             artifact: dict | None, spec: dict,
+                             evaluator_model: str, evaluated_at: str) -> list[str]:
+    """Use the same validity rules for result display and cache reuse.
+
+    Reports predating input fingerprints still use their recorded versions,
+    settings and artifact identity; missing fingerprints alone do not expire them.
+    """
+    mode = case["evaluation_mode"]
+    reasons = []
+    if report.get("settingsHash") != settings_digest(case, spec):
+        reasons.append("공통 설정 또는 Bot 지침 버전 변경" if mode == "ai_bot" else "공통 설정 변경")
+    if report.get("rubricVersion") != (bot_evaluation.QUALITY_VERSION if mode == "ai_bot" else rubric.VERSION):
+        reasons.append("평가 기준 변경")
+    if mode == "ai_bot" and report.get("botAssessment", {}).get("version") != bot_evaluation.VERSION:
+        reasons.append("Bot 지침 판정 기준 변경")
+    if (report.get("artifactSha256") != (artifact["sha256"] if artifact else None) or
+            (report.get("generatedArtifact") or {}).get("filename") != (artifact["filename"] if artifact else None)):
+        reasons.append("생성 파일 변경")
+    if report.get("requestedEvaluatorModel", report.get("evaluatorModel")) != evaluator_model:
+        reasons.append("평가 모델 변경")
+    if ("evaluationFingerprint" in report and report["evaluationFingerprint"] !=
+            evaluation_fingerprint(case, response, artifact, spec, evaluator_model)):
+        reasons.append("평가 입력 변경")
+    if web_evidence_expired(report, evaluated_at):
+        reasons.append("웹 근거 확인 시점 만료")
+    return reasons
+
+
 class EvaluationInProgress(ValueError):
     pass
 
@@ -234,6 +263,8 @@ def init_db(db_path: Path) -> None:
                 raw_json TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+            CREATE INDEX IF NOT EXISTS evaluations_response_id_id
+                ON evaluations(response_id, id);
             CREATE TABLE IF NOT EXISTS bots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -797,16 +828,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         if not report:
             return None
         spec = rubric.normalize_spec(json.loads(case["evaluation_spec_json"]), case["prompt"])
-        fingerprint = evaluation_fingerprint(case, response, artifact, spec, self.evaluator_model)
-        expected_version = bot_evaluation.QUALITY_VERSION if case["evaluation_mode"] == "ai_bot" else rubric.VERSION
-        if (report.get("settingsHash") != settings_digest(case, spec) or
-                report.get("rubricVersion") != expected_version or
-                case["evaluation_mode"] == "ai_bot" and report.get("botAssessment", {}).get("version") != bot_evaluation.VERSION or
-                report.get("artifactSha256") != (artifact["sha256"] if artifact else None) or
-                (report.get("generatedArtifact") or {}).get("filename") != (artifact["filename"] if artifact else None) or
-                report.get("requestedEvaluatorModel", report.get("evaluatorModel")) != self.evaluator_model or
-                web_evidence_expired(report, latest["created_at"]) or
-                report.get("evaluationFingerprint", fingerprint) != fingerprint):
+        if evaluation_stale_reasons(report, case, response, artifact, spec,
+                                    self.evaluator_model, latest["created_at"]):
             return None
         return {"id": latest["id"], "responseId": response_id, "scores": json.loads(latest["scores_json"]),
                 "report": report, "cached": True}
@@ -1141,27 +1164,13 @@ class AppHandler(SimpleHTTPRequestHandler):
             raw = json.loads(row["raw_json"]) if row["raw_json"] else {}
             spec = rubric.normalize_spec(json.loads(row["evaluation_spec_json"]), row["prompt"])
             report = raw.get("report")
-            settings_hash = settings_digest(row, spec)
             stale_reasons = []
             if report:
-                if report.get("settingsHash") != settings_hash:
-                    stale_reasons.append("공통 설정 또는 Bot 지침 버전 변경" if mode == "ai_bot" else "공통 설정 변경")
-                if report.get("rubricVersion") != (bot_evaluation.QUALITY_VERSION if mode == "ai_bot" else rubric.VERSION):
-                    stale_reasons.append("평가 기준 변경")
-                if mode == "ai_bot" and report.get("botAssessment", {}).get("version") != bot_evaluation.VERSION:
-                    stale_reasons.append("Bot 지침 판정 기준 변경")
-                if (report.get("artifactSha256") != row["artifact_sha256"] or
-                        (report.get("generatedArtifact") or {}).get("filename") != row["artifact_filename"]):
-                    stale_reasons.append("생성 파일 변경")
-                if report.get("requestedEvaluatorModel", report.get("evaluatorModel")) != self.evaluator_model:
-                    stale_reasons.append("평가 모델 변경")
-                if report.get("evaluationFingerprint") and report["evaluationFingerprint"] != evaluation_fingerprint(
-                        row, {"content": row["content"], "model": row["model"]},
-                        {"sha256": row["artifact_sha256"], "filename": row["artifact_filename"]}
-                        if row["artifact_sha256"] else None, spec, self.evaluator_model):
-                    stale_reasons.append("평가 입력 변경")
-                if mode == "model" and web_evidence_expired(report, row["evaluated_at"]):
-                    stale_reasons.append("웹 근거 확인 시점 만료")
+                artifact_identity = ({"sha256": row["artifact_sha256"], "filename": row["artifact_filename"]}
+                                     if row["artifact_sha256"] else None)
+                stale_reasons = evaluation_stale_reasons(
+                    report, row, {"content": row["content"], "model": row["model"]},
+                    artifact_identity, spec, self.evaluator_model, row["evaluated_at"])
             artifact_summary = ({"filename": row["artifact_filename"], "format": row["artifact_format"],
                                  "size": row["artifact_size"], "sha256": row["artifact_sha256"],
                                  "textTruncated": bool(row["artifact_text_truncated"]),

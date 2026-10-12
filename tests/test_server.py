@@ -39,6 +39,27 @@ class DatabaseTests(unittest.TestCase):
                 columns = {row[1] for row in db.execute("PRAGMA table_info(evaluations)")}
             self.assertIn("evidence_json", columns)
 
+    def test_existing_history_gets_index_without_changing_latest_results(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "old.db"
+            with connect(path) as db:
+                db.execute("""CREATE TABLE evaluations (
+                    id INTEGER PRIMARY KEY, response_id INTEGER NOT NULL,
+                    evaluator_model TEXT NOT NULL, scores_json TEXT NOT NULL,
+                    raw_json TEXT NOT NULL, created_at TEXT NOT NULL)""")
+                db.executemany("INSERT INTO evaluations VALUES (?, ?, ?, ?, ?, ?)",
+                               [(i, i % 7, 'fixed', '{}', '{}', 'past') for i in range(1, 201)])
+                query = "SELECT id FROM evaluations WHERE response_id = ? ORDER BY id DESC LIMIT 1"
+                before = [db.execute(query, (rid,)).fetchone()[0] for rid in range(7)]
+            init_db(path)
+            init_db(path)
+            with connect(path) as db:
+                after = [db.execute(query, (rid,)).fetchone()[0] for rid in range(7)]
+                plan = ' '.join(row[3] for row in db.execute('EXPLAIN QUERY PLAN ' + query, (1,)))
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM evaluations').fetchone()[0], 200)
+            self.assertEqual(before, after)
+            self.assertIn('USING COVERING INDEX', plan)
+
 
 class HTMLTests(unittest.TestCase):
     def test_nested_tables_and_noncontent(self):

@@ -377,6 +377,39 @@ class BrowserTests(unittest.TestCase):
                         page.locator('#edit-requirements').fill('변경된 요구사항')
                         page.locator('#settings-form').get_by_role('button',name='저장',exact=True).click()
                         expect(page.locator('#result-rows')).to_contain_text('공통 설정 변경')
+                        batch_runs=page.evaluate("""async () => {
+                            const originalApi=api;
+                            const runs=[];
+                            try {
+                                for (const force of [false,true]) {
+                                    let active=0, peak=0;
+                                    const calls=[];
+                                    api=async (url,body) => {
+                                        const id=Number(url.split('/')[3]);
+                                        calls.push({id,force:body.force});
+                                        peak=Math.max(peak,++active);
+                                        try {
+                                            await new Promise(resolve=>setTimeout(resolve,0));
+                                            if (id===2 || id===5) throw new Error('failure');
+                                            return {};
+                                        } finally { active--; }
+                                    };
+                                    const button=document.createElement('button');
+                                    button.textContent='Run';
+                                    const responses=Array.from({length:7},(_,i)=>({responseId:i+1,model:`model-${i+1}`}));
+                                    const result=await evaluateBatch(responses,button,force);
+                                    runs.push({force,peak,calls,result,label:button.textContent});
+                                }
+                                return runs;
+                            } finally { api=originalApi; }
+                        }""")
+                        for batch in batch_runs:
+                            self.assertEqual(batch['peak'],3)
+                            self.assertEqual([c['id'] for c in batch['calls']],list(range(1,8)))
+                            self.assertTrue(all(c['force']==batch['force'] for c in batch['calls']))
+                            self.assertEqual(batch['result']['completed'],5)
+                            self.assertEqual(len(batch['result']['errors']),2)
+                            self.assertEqual(batch['label'],'Run')
                         self.assertEqual(errors,[])
                     finally:
                         browser.close()
