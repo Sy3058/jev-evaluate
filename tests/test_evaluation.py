@@ -223,6 +223,50 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(judge.call_count,1)
         self.assertEqual(len(self.handler.history(rid)['items']),1)
 
+    def test_display_and_cache_agree_after_input_changes(self):
+        for change in ('settings', 'answer', 'artifact', 'evaluator'):
+            with self.subTest(change=change):
+                rid=self.create()
+                with patch('server.call_jev',side_effect=fake_jev):
+                    self.handler.evaluate(rid)
+                self.assertIsNotNone(self.handler.cached_evaluation(rid))
+                item=next(i for i in self.handler.list_results()['items'] if i['responseId']==rid)
+                self.assertFalse(item['stale'])
+                if change=='settings':
+                    self.handler.update_settings(item['caseId'],{'evaluationSpec':{'checks':[{'kind':'max_chars','value':200}]}})
+                elif change=='answer':
+                    with connect(self.handler.db_path) as db:
+                        db.execute('UPDATE responses SET content=? WHERE id=?',('수정된 답변',rid))
+                elif change=='artifact':
+                    self.handler.save_artifact(rid,'report.html',b'<p>Generated report</p>')
+                else:
+                    self.handler.evaluator_model='another-evaluator'
+                try:
+                    item=next(i for i in self.handler.list_results()['items'] if i['responseId']==rid)
+                    self.assertTrue(item['stale'])
+                    self.assertTrue(item['staleReasons'])
+                    self.assertIsNone(self.handler.cached_evaluation(rid))
+                    self.assertEqual(len(self.handler.history(rid)['items']),1)
+                finally:
+                    if change=='evaluator':
+                        del self.handler.evaluator_model
+
+    def test_missing_legacy_fingerprint_is_reusable_but_invalid_fingerprint_is_stale(self):
+        rid=self.create()
+        with patch('server.call_jev',side_effect=fake_jev):
+            evaluated=self.handler.evaluate(rid)
+        with connect(self.handler.db_path) as db:
+            raw=json.loads(db.execute('SELECT raw_json FROM evaluations WHERE id=?',(evaluated['id'],)).fetchone()[0])
+        raw['report'].pop('evaluationFingerprint')
+        for fingerprint, stale in ((None,False), ('invalid',True)):
+            if fingerprint is not None:
+                raw['report']['evaluationFingerprint']=fingerprint
+            with connect(self.handler.db_path) as db:
+                db.execute('UPDATE evaluations SET raw_json=? WHERE id=?',(json.dumps(raw),evaluated['id']))
+            item=next(i for i in self.handler.list_results()['items'] if i['responseId']==rid)
+            self.assertEqual(item['stale'],stale)
+            self.assertEqual(self.handler.cached_evaluation(rid) is None,stale)
+
     def test_legacy_preserved_and_not_mixed(self):
         rid=self.create()
         with connect(self.handler.db_path) as db:

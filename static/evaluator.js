@@ -22,6 +22,30 @@ async function uploadArtifact(responseId, file) {
   if (!response.ok) throw new Error(data.error || '생성 파일 업로드 실패');
   return data;
 }
+async function evaluateBatch(responses, button, force=false) {
+  let nextIndex=0, finished=0, completed=0;
+  const errors=[];
+  const label=button.textContent;
+  try {
+    await Promise.all(Array.from({length:Math.min(3,responses.length)},async()=>{
+      while (nextIndex<responses.length) {
+        const response=responses[nextIndex++];
+        try {
+          await api(`/api/responses/${response.responseId}/evaluate`,{force});
+          completed++;
+        } catch(error) {
+          errors.push(`${response.model}: ${error.message}`);
+        } finally {
+          finished++;
+          button.textContent=`평가 중 ${finished}/${responses.length}`;
+        }
+      }
+    }));
+    return {completed,errors};
+  } finally {
+    button.textContent=label;
+  }
+}
 function specFields(prefix) {
   return `<div class="spec-fields">
     <p class="hint">사용자 질문을 모든 모델의 공통 평가 기준으로 사용합니다. 요구사항을 다시 입력할 필요가 없습니다.</p>
@@ -339,25 +363,7 @@ document.addEventListener('click', async event=>{
       if (!responses.length) {notify('변경된 답변이 없습니다.');return;}
       expandedCases.add(caseId);
       button.disabled=true;
-      let completed=0;
-      let finished=0;
-      let nextIndex=0;
-      const errors=[];
-      const workers=Array.from({length:Math.min(3,responses.length)},async()=>{
-        while (nextIndex < responses.length) {
-          const response=responses[nextIndex++];
-          try {
-            await api(`/api/responses/${response.responseId}/evaluate`,{force});
-            completed++;
-          } catch(error) {
-            errors.push(`${response.model}: ${error.message}`);
-          } finally {
-            finished++;
-            button.textContent=`평가 중 ${finished}/${responses.length}`;
-          }
-        }
-      });
-      await Promise.all(workers);
+      const {completed,errors}=await evaluateBatch(responses,button,force);
       notify(errors.length?`${completed}/${responses.length}개 완료 · ${errors.join(' / ')}`:`${completed}개 답변의 평가를 저장했습니다.`);
       await loadResults();
     }
@@ -438,17 +444,8 @@ $('#evaluate-all').onclick=async event=>{
     (mode!=='ai_bot' || !botId || String(i.botId)===botId));
   if (!pending.length) { notify('선택한 범위에 미평가 답변이 없습니다.'); return; }
   button.disabled=true;
-  let nextIndex=0, finished=0, completed=0;
-  const errors=[];
   try {
-    await Promise.all(Array.from({length:Math.min(3,pending.length)},async()=>{
-      while (nextIndex<pending.length) {
-        const response=pending[nextIndex++];
-        try { await api(`/api/responses/${response.responseId}/evaluate`,{}); completed++; }
-        catch(error) { errors.push(`${response.model}: ${error.message}`); }
-        finally { finished++; button.textContent=`평가 중 ${finished}/${pending.length}`; }
-      }
-    }));
+    const {completed,errors}=await evaluateBatch(pending,button);
     await loadResults();
     notify(errors.length?`${completed}/${pending.length}개 완료 · ${errors.join(' / ')}`:`${completed}개 답변의 평가를 저장했습니다.`);
   } catch(error) { notify(error.message); }
