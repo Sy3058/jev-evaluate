@@ -5,7 +5,7 @@ import math
 import re
 from decimal import Decimal
 
-MAX_CLAIMS = 20
+MAX_CLAIMS = 80
 MIN_FACT_CONFIDENCE = 0.70
 
 

@@ -130,6 +130,8 @@ def evaluation_fingerprint(case: dict, response: dict, artifact: dict | None,
                           "rubricVersion": rubric.BASE_VERSION if case["evaluation_mode"] == "ai_bot" else rubric.VERSION,
                           "botQualityVersion": bot_evaluation.QUALITY_VERSION if case["evaluation_mode"] == "ai_bot" else None,
                           "botInstructionVersion": bot_evaluation.VERSION if case["evaluation_mode"] == "ai_bot" else None}
+    if case["evaluation_mode"] != "ai_bot" and case["category"] != "코딩":
+        value["factClaimLimit"] = fact_verification.MAX_CLAIMS
     return rubric.digest(value)
 
 
