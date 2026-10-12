@@ -10,13 +10,13 @@ const statusNames = {rated:'판정', unverifiable:'판정 불가', not_applicabl
 const requirementNames = {MET:'충족', PARTIAL:'부분 충족', UNMET:'미충족', UNKNOWN:'판정 불가', SAFE_REFUSAL:'적절한 안전 거절'};
 function notify(message) { $('#toast').textContent=message; $('#toast').classList.add('show'); setTimeout(()=>$('#toast').classList.remove('show'),5000); }
 async function api(url, body) {
-  const response = await fetch(url, body === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const response = await fetch(url, body === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json','X-JEV-CSRF-Token':config.csrfToken},body:JSON.stringify(body)});
   const data = await response.json(); if (!response.ok) throw new Error(data.error || '요청 실패'); return data;
 }
 async function uploadArtifact(responseId, file) {
   if (file.size < 1 || file.size > 10*1024*1024) throw new Error('생성 파일은 1바이트 이상 10MB 이하로 올려 주세요.');
   const response=await fetch(`/api/responses/${responseId}/artifact`,{
-    method:'POST',headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent(file.name)},body:file
+    method:'POST',headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent(file.name),'X-JEV-CSRF-Token':config.csrfToken},body:file
   });
   const data=await response.json();
   if (!response.ok) throw new Error(data.error || '생성 파일 업로드 실패');
