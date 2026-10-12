@@ -9,6 +9,7 @@ import io
 import json
 import os
 import re
+import secrets
 import sqlite3
 import time
 import urllib.error
@@ -18,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
 from html.parser import HTMLParser
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from http.server import SimpleHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlparse
@@ -30,6 +31,8 @@ import fact_verification
 from rendering import inspect_html
 from code_runner import run_python
 from generated_files import MAX_FILE_BYTES, inspect_generated_file
+from request_security import (LocalHTTPServer, HeaderDeadlineReader, RequestRejected, READ_TIMEOUT_SECONDS,
+                              MAX_JSON_BYTES, check_source, check_token, read_body)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -477,6 +480,41 @@ def call_bot_jev(state: dict[str, Any], model: str, questions: dict[str, dict[st
 class AppHandler(SimpleHTTPRequestHandler):
     db_path = DEFAULT_DB
     evaluator_model = "jev-1.13.0"
+    csrf_token = secrets.token_urlsafe(32)
+
+    def setup(self) -> None:
+        super().setup()
+        self.connection.settimeout(READ_TIMEOUT_SECONDS)
+        self.rfile.close()
+        self._header_reader = HeaderDeadlineReader(self.connection)
+        self.rfile = io.BufferedReader(self._header_reader)
+
+    def handle_one_request(self) -> None:
+        self._header_reader.start_headers()
+        try:
+            super().handle_one_request()
+        finally:
+            self._header_reader.finish_headers()
+
+    def end_headers(self) -> None:
+        self.send_header("Content-Security-Policy", "frame-ancestors 'none'")
+        self.send_header("X-Frame-Options", "DENY")
+        super().end_headers()
+
+    def parse_request(self) -> bool:
+        try:
+            parsed = super().parse_request()
+        finally:
+            self._header_reader.finish_headers()
+        if not parsed:
+            return False
+        try:
+            check_source(self)
+        except RequestRejected as error:
+            self.close_connection = True
+            self.send_json({"error": str(error)}, error.status)
+            return False
+        return True
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
@@ -488,30 +526,21 @@ class AppHandler(SimpleHTTPRequestHandler):
         body = json.dumps(value, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
     def read_json(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length", "0"))
-        if length > 5_000_000:
-            raise ValueError("요청 본문이 너무 큽니다.")
-        value = json.loads(self.rfile.read(length).decode("utf-8"))
+        value = json.loads(read_body(self, MAX_JSON_BYTES, "application/json").decode("utf-8"))
         if not isinstance(value, dict):
             raise ValueError("JSON 객체가 필요합니다.")
         return value
 
     def read_upload(self) -> tuple[str, bytes]:
-        raw_length = self.headers.get("Content-Length", "")
-        if not raw_length.isdecimal():
-            raise ValueError("파일 크기를 확인할 수 없습니다.")
-        length = int(raw_length)
-        if length < 1 or length > MAX_FILE_BYTES:
-            raise ValueError("생성 파일은 1바이트 이상 10MB 이하로 올려 주세요.")
         filename = unquote(self.headers.get("X-File-Name", ""))
-        data = self.rfile.read(length)
-        if len(data) != length:
-            raise ValueError("파일 전송이 완료되지 않았습니다.")
+        data = read_body(self, MAX_FILE_BYTES, "application/octet-stream")
         return filename, data
 
     def do_GET(self) -> None:
@@ -536,6 +565,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                     "rubricVersion": rubric.VERSION,
                     "apiKeyConfigured": bool(os.environ.get("TYPESAFE_API_KEY", "").strip()),
                     "evaluatorModel": self.evaluator_model,
+                    "csrfToken": self.csrf_token,
                 }
             )
             return
@@ -574,6 +604,7 @@ class AppHandler(SimpleHTTPRequestHandler):
     def do_POST(self) -> None:
         path = urlparse(self.path).path
         try:
+            check_token(self)
             if path == "/api/bots":
                 self.send_json(self.create_bot(self.read_json()), HTTPStatus.CREATED)
                 return
@@ -608,6 +639,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self.send_json(self.evaluate(response_id, force=payload.get("force", False)))
                 return
             self.send_json({"error": "찾을 수 없는 API입니다."}, HTTPStatus.NOT_FOUND)
+        except RequestRejected as error:
+            self.close_connection = True
+            self.send_json({"error": str(error)}, error.status)
         except EvaluationInProgress as error:
             self.send_json({"error": str(error)}, HTTPStatus.CONFLICT)
         except (ValueError, json.JSONDecodeError) as error:
@@ -1265,11 +1299,13 @@ def main() -> None:
     parser.add_argument("--db", type=Path, default=DEFAULT_DB)
     parser.add_argument("--model", default="jev-1.13.0")
     args = parser.parse_args()
+    if args.host not in {"127.0.0.1", "localhost"}:
+        parser.error("이 앱은 로컬 전용입니다. --host는 127.0.0.1 또는 localhost만 허용합니다.")
     load_env_file()
     init_db(args.db)
     AppHandler.db_path = args.db
     AppHandler.evaluator_model = args.model
-    server = ThreadingHTTPServer((args.host, args.port), AppHandler)
+    server = LocalHTTPServer((args.host, args.port), AppHandler)
     print(f"JEV 평가기: http://{args.host}:{args.port}")
     print(f"데이터베이스: {args.db}")
     try:
